@@ -1,7 +1,7 @@
 import streamlit as st
 from io import BytesIO
 from reportlab.pdfgen import canvas
-import json, os, re
+import json, os, re, base64
 from datetime import date
 from pdfrw import PdfReader, PdfWriter, PageMerge
 from PIL import Image
@@ -112,7 +112,7 @@ def save_signature(img_array):
 
 def generate_pdf(form):
     if not os.path.exists(TEMPLATE_PATH):
-        st.error("⚠️ Place **backflow_template.pdf** in the same folder as app.py")
+        st.error("\u26a0\ufe0f Place **backflow_template.pdf** in the same folder as app.py")
         st.stop()
 
     buf = BytesIO()
@@ -159,12 +159,10 @@ def generate_pdf(form):
     elif result == "FAILED":
         draw_x(c, *CHECKBOXES["FAILED"])
 
-    # Repairs / Remarks — x=290, y starts at 240, lines go up
     rx, ry, rh, rmax, rw = REPAIR_BOX
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
 
-    # Digital signature — stamp saved PNG onto technician signature area
     sig_buf = load_signature()
     if sig_buf:
         c.drawImage(sig_buf, 170, 138, width=130, height=28, mask="auto")
@@ -189,6 +187,23 @@ def safe_filename(customer, location):
     return f"{clean(customer) or 'Customer'} - {clean(location) or 'location'}.pdf"
 
 
+def pdf_download_link(pdf_bytes, filename):
+    """Return an HTML anchor that works on iOS Safari (opens PDF inline).
+    iOS blocks programmatic clicks and ignores the `download` attribute on
+    data-URI links, so we open in a new tab instead — the user can then
+    use the Share sheet to save to Files or print."""
+    b64 = base64.b64encode(pdf_bytes.read()).decode()
+    href = f'data:application/pdf;base64,{b64}'
+    return (
+        f'<a href="{href}" target="_blank" '
+        f'style="display:block;text-align:center;padding:14px 0;'
+        f'background:#0068c9;color:white;font-size:1.1rem;'
+        f'font-weight:bold;border-radius:8px;text-decoration:none;'
+        f'margin-top:8px;">'
+        f'\U0001f4c4 Open / Save PDF: {filename}</a>'
+    )
+
+
 def load_session():
     data = {}
     if os.path.exists(SESSION_FILE):
@@ -208,8 +223,8 @@ def save_session(data):
 
 
 # ── UI ──────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
-st.title("🔧 United Fire — Backflow Preventer Test Report")
+st.set_page_config(page_title="United Fire \u2014 Backflow Report", page_icon="\U0001f527", layout="wide")
+st.title("\U0001f527 United Fire \u2014 Backflow Preventer Test Report")
 
 if "form" not in st.session_state:
     st.session_state.form = load_session()
@@ -218,15 +233,15 @@ f = st.session_state.form
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    if st.button("💾 Save Session"):
+    if st.button("\U0001f4be Save Session"):
         save_session(f)
         st.success("Saved!")
 with col2:
-    if st.button("📂 Load Session"):
+    if st.button("\U0001f4c2 Load Session"):
         st.session_state.form = load_session()
         st.rerun()
 with col3:
-    if st.button("🗑️ Clear (keep ⭐ sticky fields)"):
+    if st.button("\U0001f5d1\ufe0f Clear (keep \u2b50 sticky fields)"):
         st.session_state.form = {k: v for k, v in f.items() if k in STICKY}
         for k, v in STATIC_TESTER_DEFAULTS.items():
             st.session_state.form.setdefault(k, f.get(k, v))
@@ -234,23 +249,23 @@ with col3:
 
 st.divider()
 
-st.subheader("📋 Job Information")
+st.subheader("\U0001f4cb Job Information")
 r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
 f["date"]   = r1c1.text_input("Date", f.get("date", date.today().strftime("%m/%d/%Y")))
-f["branch"] = r1c2.text_input("Branch ⭐", f.get("branch", ""))
-f["ahj"]    = r1c3.text_input("Authority Having Jurisdiction ⭐", f.get("ahj", ""))
+f["branch"] = r1c2.text_input("Branch \u2b50", f.get("branch", ""))
+f["ahj"]    = r1c3.text_input("Authority Having Jurisdiction \u2b50", f.get("ahj", ""))
 f["customer_name"]  = st.text_input("Customer / Site Name",  f.get("customer_name", ""))
 f["street_address"] = st.text_input("Street Address",         f.get("street_address", ""))
 f["location"]       = st.text_input("Location of Assembly",   f.get("location", ""))
 
 st.divider()
 
-st.subheader("🔩 Backflow Assembly")
+st.subheader("\U0001f529 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
 f["serial_number"] = c1.text_input("Serial Number",    f.get("serial_number", ""))
-f["manufacturer"]  = c2.text_input("Manufacturer ⭐", f.get("manufacturer", ""))
-f["model"]         = c3.text_input("Model ⭐",          f.get("model", ""))
-f["size"]          = c4.text_input("Size ⭐",           f.get("size", ""))
+f["manufacturer"]  = c2.text_input("Manufacturer \u2b50", f.get("manufacturer", ""))
+f["model"]         = c3.text_input("Model \u2b50",          f.get("model", ""))
+f["size"]          = c4.text_input("Size \u2b50",           f.get("size", ""))
 
 c1, c2, c3 = st.columns(3)
 asm_opts = ["", "RP", "DC", "PVB", "SVB"]
@@ -276,7 +291,7 @@ f["bypass"] = c3.selectbox(
 
 st.divider()
 
-st.subheader("🧪 Testing Information")
+st.subheader("\U0001f9ea Testing Information")
 tc1, tc2, tc3, tc4 = st.columns(4)
 
 with tc1:
@@ -326,7 +341,7 @@ f["assembly_result"] = tc_r.radio(
 
 st.divider()
 
-st.subheader("🔧 Repairs & Remarks")
+st.subheader("\U0001f527 Repairs & Remarks")
 f["repair_desc"] = st.text_area(
     "Description of Repairs / Remarks (including Part #)",
     f.get("repair_desc", ""),
@@ -335,29 +350,29 @@ f["repair_desc"] = st.text_area(
 
 st.divider()
 
-with st.expander("🧰 Tester Info / Defaults", expanded=False):
+with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
     st.caption("These values stay saved and auto-populate each new form. Open only when you need to update them.")
     t1, t2, t3 = st.columns(3)
-    f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer ⭐", f.get("gauge_mfg", ""))
-    f["gauge_serial"] = t2.text_input("Gauge Serial # ⭐",     f.get("gauge_serial", ""))
-    f["date_cal"]     = t3.text_input("Date Calibrated ⭐",    f.get("date_cal", ""))
+    f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer \u2b50", f.get("gauge_mfg", ""))
+    f["gauge_serial"] = t2.text_input("Gauge Serial # \u2b50",     f.get("gauge_serial", ""))
+    f["date_cal"]     = t3.text_input("Date Calibrated \u2b50",    f.get("date_cal", ""))
     t1b, t2b, t3b = st.columns(3)
-    f["technician"] = t1b.text_input("Technician ⭐",        f.get("technician", ""))
-    f["cert_no"]    = t2b.text_input("Certification No. ⭐", f.get("cert_no", ""))
-    f["recert"]     = t3b.text_input("Re-Cert Due Date ⭐",  f.get("recert", ""))
+    f["technician"] = t1b.text_input("Technician \u2b50",        f.get("technician", ""))
+    f["cert_no"]    = t2b.text_input("Certification No. \u2b50", f.get("cert_no", ""))
+    f["recert"]     = t3b.text_input("Re-Cert Due Date \u2b50",  f.get("recert", ""))
 
     st.markdown("---")
-    st.markdown("**✍️ Digital Signature**")
+    st.markdown("**\u270d\ufe0f Digital Signature**")
     sig_exists = os.path.exists(SIG_FILE)
     if sig_exists:
-        st.success("✅ Signature saved — will stamp on every PDF automatically.")
+        st.success("\u2705 Signature saved \u2014 will stamp on every PDF automatically.")
         with open(SIG_FILE, "rb") as sf:
             st.image(sf.read(), width=200)
-        if st.button("🗑️ Clear Saved Signature"):
+        if st.button("\U0001f5d1\ufe0f Clear Saved Signature"):
             os.remove(SIG_FILE)
             st.rerun()
     else:
-        st.info("Draw your signature below then click **Save Signature**. It auto-stamps on every PDF from now on — no need to redraw.")
+        st.info("Draw your signature below then click **Save Signature**. It auto-stamps on every PDF from now on \u2014 no need to redraw.")
 
     try:
         from streamlit_drawable_canvas import st_canvas
@@ -371,7 +386,7 @@ with st.expander("🧰 Tester Info / Defaults", expanded=False):
             drawing_mode="freedraw",
             key="sig_canvas",
         )
-        if st.button("💾 Save Signature"):
+        if st.button("\U0001f4be Save Signature"):
             if sig_canvas.image_data is not None:
                 arr = sig_canvas.image_data
                 if arr.max() > 0:
@@ -379,7 +394,7 @@ with st.expander("🧰 Tester Info / Defaults", expanded=False):
                     st.success("Signature saved! It will appear on all future PDFs.")
                     st.rerun()
                 else:
-                    st.warning("Canvas is empty — draw your signature first.")
+                    st.warning("Canvas is empty \u2014 draw your signature first.")
     except ImportError:
         st.warning(
             "Install **streamlit-drawable-canvas** to enable the digital signature pad:\n\n"
@@ -388,19 +403,23 @@ with st.expander("🧰 Tester Info / Defaults", expanded=False):
 
 st.divider()
 
-if st.button("📄 Generate PDF", type="primary", use_container_width=True):
+if st.button("\U0001f4c4 Generate & Open PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
             pdf_bytes = generate_pdf(f)
             fname = safe_filename(f.get("customer_name", "Customer"), f.get("street_address", "Address"))
-            st.download_button(
-                f"⬇️ Download: {fname}",
-                data=pdf_bytes,
-                file_name=fname,
-                mime="application/pdf",
-                use_container_width=True,
-            )
             save_session(f)
-            st.success(f"✅ {fname}")
+            # Use a base64 data-URI link that iOS Safari can open directly.
+            # The link opens the PDF in a new tab; from there the user taps
+            # the Share icon to save to Files, AirDrop, print, etc.
+            st.markdown(
+                pdf_download_link(pdf_bytes, fname),
+                unsafe_allow_html=True,
+            )
+            st.info(
+                "\U0001f4f1 **iPhone / iPad:** Tap the button above \u2192 PDF opens in a new tab \u2192 "
+                "tap the Share icon (\U0001f4e4) to Save to Files, AirDrop, or print."
+            )
+            st.success(f"\u2705 {fname}")
         except Exception as e:
             st.error(f"Error: {e}")
