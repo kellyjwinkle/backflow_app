@@ -44,30 +44,27 @@ CHECKBOXES = {
     "RP": (210,460), "DC": (270,460), "PVB": (210,441), "SVB": (270,441),
     "FIRE": (395,490), "DOMESTIC": (395,475), "IRRIGATION": (395,460), "ATTRACTION": (395,442),
     "BYPASS_YES": (500,470), "BYPASS_NO": (500,450),
-    "CV1_CLOSED": (130,390), "CV1_LEAKED": (130,375), "CV1_NA": (130,355),
-    "CV2_CLOSED": (330,390), "CV2_LEAKED": (330,375), "CV2_NA": (352,355),
+    "CV1_CLOSED": (130,390), "CV1_LEAKED": (130,375),
+    "CV2_CLOSED": (330,390), "CV2_LEAKED": (330,375),
     "PVB_AI_CLOSED": (425,405), "PVB_AI_OPENED": (425,370),
     "PVB_CV_LEAKED": (425,355), "PVB_CV_HELD": (425,325),
-    "RV_OPENED": (225,398), "RV_DIDNOTOPEN": (225,378), "RV_NA": (208,382),
+    "RV_OPENED": (225,398), "RV_DIDNOTOPEN": (225,378),
     "RV_OUT_CLOSED": (225,334), "RV_OUT_LEAKED": (272,334),
     "RV_IN_CLOSED": (225,310), "RV_IN_LEAKED": (272,310),
     "PASSED": (400,290), "FAILED": (462,290),
-    "REP_CVA": (313,250), "REP_FLUSH": (432,250),
-    "REP_RVA": (313,238), "REP_CLEAN": (432,238),
-    "REP_AIVA": (313,226), "REP_OSY": (432,226), "REP_REPACK": (477,226),
-    "REP_RUBBER": (313,214), "REP_NEW": (432,214),
 }
 
 def draw_x(c, bx, by, size=3.8):
-    c.setStrokeColorRGB(0.05, 0.05, 0.05)
-    c.setLineWidth(1.2)
+    # Bold red X
+    c.setStrokeColorRGB(1, 0, 0)
+    c.setLineWidth(2.0)
     c.line(bx-size, by-size, bx+size, by+size)
     c.line(bx+size, by-size, bx-size, by+size)
 
 def put_text(c, val, x, y, sz=8):
     if val:
-        c.setFont("Helvetica", sz)
-        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", sz)
+        c.setFillColorRGB(1, 0, 0)
         c.drawString(x, y, str(val))
 
 def wrap_text(text, w=38):
@@ -106,20 +103,20 @@ def generate_pdf(form):
     if bp == "YES": draw_x(c, *CHECKBOXES["BYPASS_YES"])
     elif bp == "NO": draw_x(c, *CHECKBOXES["BYPASS_NO"])
 
-    # CV1
-    for k in ["CV1_CLOSED", "CV1_LEAKED", "CV1_NA"]:
+    # CV1 (no N/A)
+    for k in ["CV1_CLOSED", "CV1_LEAKED"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
-    # CV2
-    for k in ["CV2_CLOSED", "CV2_LEAKED", "CV2_NA"]:
+    # CV2 (no N/A)
+    for k in ["CV2_CLOSED", "CV2_LEAKED"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
     # PVB/SVB
     for k in ["PVB_AI_CLOSED", "PVB_AI_OPENED", "PVB_CV_LEAKED", "PVB_CV_HELD"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
-    # Relief Valve
-    for k in ["RV_OPENED", "RV_DIDNOTOPEN", "RV_NA",
+    # Relief Valve (no N/A)
+    for k in ["RV_OPENED", "RV_DIDNOTOPEN",
               "RV_OUT_CLOSED", "RV_OUT_LEAKED", "RV_IN_CLOSED", "RV_IN_LEAKED"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
@@ -128,23 +125,9 @@ def generate_pdf(form):
     if result == "PASSED": draw_x(c, *CHECKBOXES["PASSED"])
     elif result == "FAILED": draw_x(c, *CHECKBOXES["FAILED"])
 
-    # Repair checkboxes
-    for fk, ck in [
-        ("rep_cva","REP_CVA"), ("rep_flush","REP_FLUSH"),
-        ("rep_rva","REP_RVA"), ("rep_clean","REP_CLEAN"),
-        ("rep_aiva","REP_AIVA"), ("rep_osy","REP_OSY"),
-        ("rep_repack","REP_REPACK"),
-        ("rep_rubber","REP_RUBBER"), ("rep_new","REP_NEW"),
-    ]:
-        if form.get(fk): draw_x(c, *CHECKBOXES[ck])
-
-    # Repair description text (left box)
+    # Repair/Remarks text box only
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), 38)[:4]):
         put_text(c, ln, 96, 200 - i * 10, 7)
-
-    # Remarks
-    for i, ln in enumerate(wrap_text(form.get("remarks", ""), 52)[:2]):
-        put_text(c, ln, 96, 179 - i * 10, 7)
 
     c.save(); buf.seek(0)
 
@@ -238,7 +221,6 @@ with tc1:
     st.markdown("**Check Valve #1**")
     f["cv1_closed"] = st.checkbox("Closed Tight", f.get("cv1_closed", False), key="cv1c")
     f["cv1_leaked"] = st.checkbox("Leaked",       f.get("cv1_leaked", False), key="cv1l")
-    f["cv1_na"]     = st.checkbox("N/A",           f.get("cv1_na",    False), key="cv1n")
     f["cv1_dp"]     = st.text_input("DP Across CV1 (PSI)", f.get("cv1_dp", ""), key="cv1dp")
 
 with tc2:
@@ -246,7 +228,6 @@ with tc2:
     f["rv_opened"]     = st.checkbox("Opened At",    f.get("rv_opened",     False), key="rvo")
     f["rv_psi"]        = st.text_input("RV PSI",      f.get("rv_psi", ""),          key="rvpsi")
     f["rv_didnotopen"] = st.checkbox("Did Not Open", f.get("rv_didnotopen", False), key="rvdno")
-    f["rv_na"]         = st.checkbox("N/A",           f.get("rv_na",        False), key="rvna")
     st.markdown("*Outlet Shut-Off*")
     f["rv_out_closed"] = st.checkbox("Closed",  f.get("rv_out_closed", False), key="rvoc")
     f["rv_out_leaked"] = st.checkbox("Leaked",  f.get("rv_out_leaked", False), key="rvol")
@@ -258,7 +239,6 @@ with tc3:
     st.markdown("**Check Valve #2**")
     f["cv2_closed"] = st.checkbox("Closed Tight", f.get("cv2_closed", False), key="cv2c")
     f["cv2_leaked"] = st.checkbox("Leaked",       f.get("cv2_leaked", False), key="cv2l")
-    f["cv2_na"]     = st.checkbox("N/A",           f.get("cv2_na",    False), key="cv2n")
     f["cv2_dp"]     = st.text_input("DP Across CV2 (PSI)", f.get("cv2_dp", ""), key="cv2dp")
 
 with tc4:
@@ -282,25 +262,10 @@ f["assembly_result"] = tc_r.radio("This Assembly",
 
 st.divider()
 
-# ── Repairs ──
-st.subheader("🔧 Repairs")
-f["repair_desc"] = st.text_area("Description of Repairs (including Part #)",
-    f.get("repair_desc", ""), height=80)
-
-rc1, rc2 = st.columns(2)
-with rc1:
-    f["rep_cva"]    = st.checkbox("Check Valve Assembly",     f.get("rep_cva",    False))
-    f["rep_rva"]    = st.checkbox("Relief Valve Assembly",    f.get("rep_rva",    False))
-    f["rep_aiva"]   = st.checkbox("Air Inlet Valve Assembly", f.get("rep_aiva",   False))
-    f["rep_rubber"] = st.checkbox("Rubber Repair Kit",        f.get("rep_rubber", False))
-with rc2:
-    f["rep_flush"]  = st.checkbox("Flush & Remove Debris",    f.get("rep_flush",  False))
-    f["rep_clean"]  = st.checkbox("Clean Internal",           f.get("rep_clean",  False))
-    f["rep_osy"]    = st.checkbox("OS&Y Repair",              f.get("rep_osy",    False))
-    f["rep_repack"] = st.checkbox("Re-Packing",               f.get("rep_repack", False))
-    f["rep_new"]    = st.checkbox("New Backflow",             f.get("rep_new",    False))
-
-f["remarks"] = st.text_area("Remarks / Repairs Needed", f.get("remarks", ""), height=60)
+# ── Repairs / Remarks ──
+st.subheader("🔧 Repairs & Remarks")
+f["repair_desc"] = st.text_area("Description of Repairs / Remarks (including Part #)",
+    f.get("repair_desc", ""), height=100)
 
 st.divider()
 
