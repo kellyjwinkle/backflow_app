@@ -16,7 +16,7 @@ STICKY = {
 
 # Calibrated from PPTX text box positions mapped to PDF 612x792 coordinate space
 TEXT_FIELDS = {
-    "date":           (145, 583, 8),
+    "date":           (135, 583, 8),
     "branch":         (250, 583, 8),
     "ahj":            (437, 583, 8),
     "customer_name":  (200, 567, 8),
@@ -41,15 +41,15 @@ TEXT_FIELDS = {
 }
 
 CHECKBOXES = {
-    "RP": (215,460), "DC": (273,460), "PVB": (215,445), "SVB": (273,445),
-    "FIRE": (390,490), "DOMESTIC": (390,475), "IRRIGATION": (390,460), "ATTRACTION": (390,445),
-    "BYPASS_YES": (500,470), "BYPASS_NO": (500,460),
+    "RP": (210,460), "DC": (270,460), "PVB": (210,441), "SVB": (270,441),
+    "FIRE": (390,490), "DOMESTIC": (390,475), "IRRIGATION": (390,460), "ATTRACTION": (390,442),
+    "BYPASS_YES": (500,470), "BYPASS_NO": (500,450),
     "CV1_CLOSED": (200,395), "CV1_LEAKED": (200,375), "CV1_NA": (200,355),
     "CV2_CLOSED": (352,395), "CV2_LEAKED": (352,375), "CV2_NA": (352,355),
     "PVB_AI_CLOSED": (472,406), "PVB_AI_OPENED": (401,370),
     "PVB_CV_LEAKED": (454,335), "PVB_CV_HELD": (401,303),
-    "RV_OPENED": (177,402), "RV_DIDNOTOPEN": (172,382), "RV_NA": (208,382),
-    "RV_OUT_CLOSED": (176,334), "RV_OUT_LEAKED": (213,334),
+    "RV_OPENED": (210,402), "RV_DIDNOTOPEN": (210,382), "RV_NA": (208,382),
+    "RV_OUT_CLOSED": (215,334), "RV_OUT_LEAKED": (215,334),
     "RV_IN_CLOSED": (174,305), "RV_IN_LEAKED": (211,305),
     "PASSED": (385,270), "FAILED": (462,270),
     "REP_CVA": (313,250), "REP_FLUSH": (432,250),
