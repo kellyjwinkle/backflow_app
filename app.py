@@ -26,8 +26,8 @@ TEXT_FIELDS = {
     "manufacturer":   (205, 490, 8),
     "model":          (205, 475, 8),
     "size":           (390, 507, 8),
-    "rv_psi":         (275, 387, 7),
-    "cv1_dp":         (170, 321, 8),
+    "rv_psi":         (290, 400, 7),
+    "cv1_dp":         (180, 321, 8),
     "cv2_dp":         (380, 312, 8),
     "pvb_ai_psi":     (490, 375, 7),
     "pvb_cv_psi":     (490, 320, 7),
@@ -41,10 +41,10 @@ TEXT_FIELDS = {
 }
 
 CHECKBOXES = {
-    "RP": (215,460), "DC": (270,460), "PVB": (215,445), "SVB": (270,445),
+    "RP": (215,460), "DC": (273,460), "PVB": (215,445), "SVB": (273,445),
     "FIRE": (390,490), "DOMESTIC": (390,475), "IRRIGATION": (390,460), "ATTRACTION": (390,445),
-    "BYPASS_YES": (500,500), "BYPASS_NO": (500,470),
-    "CV1_CLOSED": (102,395), "CV1_LEAKED": (102,375), "CV1_NA": (102,355),
+    "BYPASS_YES": (500,470), "BYPASS_NO": (500,460),
+    "CV1_CLOSED": (200,395), "CV1_LEAKED": (200,375), "CV1_NA": (200,355),
     "CV2_CLOSED": (352,395), "CV2_LEAKED": (352,375), "CV2_NA": (352,355),
     "PVB_AI_CLOSED": (472,406), "PVB_AI_OPENED": (401,370),
     "PVB_CV_LEAKED": (454,335), "PVB_CV_HELD": (401,303),
