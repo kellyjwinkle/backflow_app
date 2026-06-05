@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from io import BytesIO
 from reportlab.pdfgen import canvas
 import json, os, re, base64
@@ -13,7 +14,6 @@ SIG_FILE      = "signature.png"
 PAGE_W, PAGE_H = 612, 792
 
 # Fields kept when starting the NEXT report on the same job
-# (serial_number intentionally excluded — each backflow has its own)
 NEXT_REPORT_KEEP = {
     'branch', 'ahj', 'customer_name', 'street_address',
     'manufacturer', 'model', 'size', 'assembly_type', 'system_service',
@@ -183,7 +183,8 @@ def generate_pdf(form):
     out = BytesIO()
     PdfWriter().write(out, tp)
     out.seek(0)
-    return out
+    # Return raw bytes so we never hit a seek/position issue
+    return out.read()
 
 
 def safe_filename(customer, location):
@@ -191,17 +192,39 @@ def safe_filename(customer, location):
     return f"{clean(customer) or 'Customer'} - {clean(location) or 'location'}.pdf"
 
 
-def pdf_download_link(pdf_bytes, filename):
-    b64 = base64.b64encode(pdf_bytes.read()).decode()
-    href = f'data:application/pdf;base64,{b64}'
-    return (
-        f'<a href="{href}" target="_blank" '
-        f'style="display:block;text-align:center;padding:14px 0;'
-        f'background:#0068c9;color:white;font-size:1.1rem;'
-        f'font-weight:bold;border-radius:8px;text-decoration:none;'
-        f'margin-top:8px;">'
-        f'\U0001f4c4 Open / Save PDF: {filename}</a>'
-    )
+def show_pdf_ios(pdf_bytes: bytes, filename: str):
+    """
+    Render the PDF in a way that works on iOS Safari.
+
+    iOS Safari 16+ blocks:
+      - programmatic window.open() / window.location  (not user-gesture)
+      - <a download> on data: URIs
+      - <a target=_blank> on data: URIs
+
+    What DOES work:
+      - An <a href="data:..." target="_blank"> that the USER taps directly
+        inside an iframe served by st.components.v1.html.
+
+    We embed the link in a tiny self-contained HTML component so the tap
+    originates from a real user gesture inside the iframe, satisfying Safari.
+    """
+    b64 = base64.b64encode(pdf_bytes).decode()
+    safe_name = filename.replace('"', '')
+    html = f"""
+    <html><body style="margin:0;padding:0;font-family:sans-serif;">
+      <a href="data:application/pdf;base64,{b64}"
+         target="_blank"
+         style="display:block;text-align:center;padding:16px;
+                background:#0068c9;color:white;font-size:1.05rem;
+                font-weight:bold;border-radius:8px;text-decoration:none;">
+        &#128196; Open / Save PDF &mdash; {safe_name}
+      </a>
+      <p style="text-align:center;font-size:0.8rem;color:#555;margin-top:8px;">
+        iPhone/iPad: tap above &rarr; PDF opens &rarr; tap Share &#128228; to save or print.
+      </p>
+    </body></html>
+    """
+    components.html(html, height=100)
 
 
 def load_session():
@@ -222,7 +245,7 @@ def save_session(data):
         json.dump(data, f)
 
 
-# ── UI ───────────────────────────────────────────────────────────────────────
+# ── UI ──────────────────────────────────────────────────────────────
 st.set_page_config(page_title="United Fire \u2014 Backflow Report", page_icon="\U0001f527", layout="wide")
 st.title("\U0001f527 United Fire \u2014 Backflow Preventer Test Report")
 
@@ -231,7 +254,7 @@ if "form" not in st.session_state:
 
 f = st.session_state.form
 
-# ── Top action bar ────────────────────────────────────────────────────────────
+# ── Top action bar ───────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     if st.button("\U0001f4be Save Session"):
@@ -242,19 +265,18 @@ with col2:
         st.session_state.form = load_session()
         st.rerun()
 with col3:
-    # Same job, next backflow — keeps job info + assembly type/service/mfg/model/size
-    if st.button("\u27a1\ufe0f Next Report (same job)", help="Clears test results & serial number. Keeps job info, manufacturer, model, size, assembly type, system service, and tester defaults."):
+    if st.button("\u27a1\ufe0f Next Report (same job)",
+                 help="Clears test results & serial number. Keeps job info, manufacturer, model, size, assembly type, system service, and tester defaults."):
         kept = {k: v for k, v in f.items() if k in NEXT_REPORT_KEEP}
         for k, v in STATIC_TESTER_DEFAULTS.items():
             kept.setdefault(k, f.get(k, v))
-        # Reset test result fields and date to today
         kept["date"] = date.today().strftime("%m/%d/%Y")
         kept["test_date"] = date.today().strftime("%m/%d/%Y")
         st.session_state.form = kept
         st.rerun()
 with col4:
-    # Brand new job — keeps only tester/gauge info
-    if st.button("\U0001f3e2 New Job", help="Clears everything except tester info (gauge, technician, cert). Use this when moving to a new customer/site."):
+    if st.button("\U0001f3e2 New Job",
+                 help="Clears everything except tester info (gauge, technician, cert)."):
         kept = {k: f.get(k, v) for k, v in STATIC_TESTER_DEFAULTS.items()}
         kept["date"] = date.today().strftime("%m/%d/%Y")
         kept["test_date"] = date.today().strftime("%m/%d/%Y")
@@ -278,7 +300,7 @@ st.divider()
 # ── Backflow Assembly ─────────────────────────────────────────────────────────
 st.subheader("\U0001f529 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
-f["serial_number"] = c1.text_input("Serial Number",   f.get("serial_number", ""))
+f["serial_number"] = c1.text_input("Serial Number",      f.get("serial_number", ""))
 f["manufacturer"]  = c2.text_input("Manufacturer \u21ba", f.get("manufacturer", ""), help="Kept between reports on the same job")
 f["model"]         = c3.text_input("Model \u21ba",         f.get("model", ""),         help="Kept between reports on the same job")
 f["size"]          = c4.text_input("Size \u21ba",           f.get("size", ""),           help="Kept between reports on the same job")
@@ -286,24 +308,21 @@ f["size"]          = c4.text_input("Size \u21ba",           f.get("size", ""),  
 c1, c2, c3 = st.columns(3)
 asm_opts = ["", "RP", "DC", "PVB", "SVB"]
 f["assembly_type"] = c1.selectbox(
-    "Type of Assembly \u21ba",
-    asm_opts,
+    "Type of Assembly \u21ba", asm_opts,
     index=asm_opts.index(f.get("assembly_type", "")) if f.get("assembly_type", "") in asm_opts else 0,
     help="Kept between reports on the same job",
 )
 
 ss_opts = ["", "FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]
 f["system_service"] = c2.selectbox(
-    "System Service \u21ba",
-    ss_opts,
+    "System Service \u21ba", ss_opts,
     index=ss_opts.index(f.get("system_service", "")) if f.get("system_service", "") in ss_opts else 0,
     help="Kept between reports on the same job",
 )
 
 bp_opts = ["", "YES", "NO"]
 f["bypass"] = c3.selectbox(
-    "Bypass?",
-    bp_opts,
+    "Bypass?", bp_opts,
     index=bp_opts.index(f.get("bypass", "")) if f.get("bypass", "") in bp_opts else 0,
 )
 
@@ -352,8 +371,7 @@ tc_l, tc_r = st.columns(2)
 f["test_date"] = tc_l.text_input("Test Date", f.get("test_date", date.today().strftime("%m/%d/%Y")))
 res_opts = ["", "PASSED", "FAILED"]
 f["assembly_result"] = tc_r.radio(
-    "This Assembly",
-    res_opts,
+    "This Assembly", res_opts,
     index=res_opts.index(f.get("assembly_result", "")) if f.get("assembly_result", "") in res_opts else 0,
     horizontal=True,
 )
@@ -372,7 +390,7 @@ st.divider()
 
 # ── Tester Info / Defaults ────────────────────────────────────────────────────
 with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
-    st.caption("These values stay saved and auto-populate each new form. Open only when you need to update them.")
+    st.caption("These values stay saved and auto-populate each new form.")
     t1, t2, t3 = st.columns(3)
     f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer", f.get("gauge_mfg", ""))
     f["gauge_serial"] = t2.text_input("Gauge Serial #",     f.get("gauge_serial", ""))
@@ -386,14 +404,14 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
     st.markdown("**\u270d\ufe0f Digital Signature**")
     sig_exists = os.path.exists(SIG_FILE)
     if sig_exists:
-        st.success("\u2705 Signature saved \u2014 will stamp on every PDF automatically.")
+        st.success("\u2705 Signature saved \u2014 stamps on every PDF automatically.")
         with open(SIG_FILE, "rb") as sf:
             st.image(sf.read(), width=200)
         if st.button("\U0001f5d1\ufe0f Clear Saved Signature"):
             os.remove(SIG_FILE)
             st.rerun()
     else:
-        st.info("Draw your signature below then click **Save Signature**. It auto-stamps on every PDF from now on \u2014 no need to redraw.")
+        st.info("Draw your signature below then click **Save Signature**.")
 
     try:
         from streamlit_drawable_canvas import st_canvas
@@ -412,15 +430,12 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
                 arr = sig_canvas.image_data
                 if arr.max() > 0:
                     save_signature(arr)
-                    st.success("Signature saved! It will appear on all future PDFs.")
+                    st.success("Signature saved!")
                     st.rerun()
                 else:
                     st.warning("Canvas is empty \u2014 draw your signature first.")
     except ImportError:
-        st.warning(
-            "Install **streamlit-drawable-canvas** to enable the digital signature pad:\n\n"
-            "`pip install streamlit-drawable-canvas`"
-        )
+        st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
 
 st.divider()
 
@@ -428,14 +443,15 @@ st.divider()
 if st.button("\U0001f4c4 Generate & Open PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
-            pdf_bytes = generate_pdf(f)
-            fname = safe_filename(f.get("customer_name", "Customer"), f.get("street_address", "Address"))
-            save_session(f)
-            st.markdown(pdf_download_link(pdf_bytes, fname), unsafe_allow_html=True)
-            st.info(
-                "\U0001f4f1 **iPhone / iPad:** Tap the button above \u2192 PDF opens in a new tab \u2192 "
-                "tap the Share icon (\U0001f4e4) to Save to Files, AirDrop, or print."
+            pdf_bytes = generate_pdf(f)   # returns raw bytes now
+            fname = safe_filename(
+                f.get("customer_name", "Customer"),
+                f.get("street_address", "Address")
             )
-            st.success(f"\u2705 {fname}")
+            save_session(f)
+            # Render the tap-to-open link inside an iframe component.
+            # This satisfies iOS Safari's requirement that opens be user-gesture-initiated.
+            show_pdf_ios(pdf_bytes, fname)
+            st.success(f"\u2705 PDF ready: {fname}")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error generating PDF: {e}")
