@@ -12,9 +12,17 @@ SESSION_FILE  = "session_data.json"
 SIG_FILE      = "signature.png"
 PAGE_W, PAGE_H = 612, 792
 
-STICKY = {
-    'branch', 'ahj', 'customer_name', 'street_address', 'manufacturer', 'model', 'size',
-    'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert'
+# Fields kept when starting the NEXT report on the same job
+# (serial_number intentionally excluded — each backflow has its own)
+NEXT_REPORT_KEEP = {
+    'branch', 'ahj', 'customer_name', 'street_address',
+    'manufacturer', 'model', 'size', 'assembly_type', 'system_service',
+    'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert',
+}
+
+# Fields kept when starting a BRAND NEW JOB (only tester/gauge info)
+NEW_JOB_KEEP = {
+    'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert',
 }
 
 STATIC_TESTER_DEFAULTS = {
@@ -65,7 +73,6 @@ CHECKBOXES = {
     "PASSED": (360,292), "FAILED": (415,292),
 }
 
-# Repair/Remarks text box: (x, start_y, line_height, max_lines, wrap_chars)
 REPAIR_BOX = (290, 240, 10, 5, 40)
 
 
@@ -140,15 +147,12 @@ def generate_pdf(form):
     for k in ["CV1_CLOSED", "CV1_LEAKED"]:
         if form.get(k.lower()):
             draw_x(c, *CHECKBOXES[k])
-
     for k in ["CV2_CLOSED", "CV2_LEAKED"]:
         if form.get(k.lower()):
             draw_x(c, *CHECKBOXES[k])
-
     for k in ["PVB_AI_CLOSED", "PVB_AI_OPENED", "PVB_CV_LEAKED", "PVB_CV_HELD"]:
         if form.get(k.lower()):
             draw_x(c, *CHECKBOXES[k])
-
     for k in ["RV_OPENED", "RV_DIDNOTOPEN", "RV_OUT_CLOSED", "RV_OUT_LEAKED", "RV_IN_CLOSED", "RV_IN_LEAKED"]:
         if form.get(k.lower()):
             draw_x(c, *CHECKBOXES[k])
@@ -188,10 +192,6 @@ def safe_filename(customer, location):
 
 
 def pdf_download_link(pdf_bytes, filename):
-    """Return an HTML anchor that works on iOS Safari (opens PDF inline).
-    iOS blocks programmatic clicks and ignores the `download` attribute on
-    data-URI links, so we open in a new tab instead — the user can then
-    use the Share sheet to save to Files or print."""
     b64 = base64.b64encode(pdf_bytes.read()).decode()
     href = f'data:application/pdf;base64,{b64}'
     return (
@@ -222,7 +222,7 @@ def save_session(data):
         json.dump(data, f)
 
 
-# ── UI ──────────────────────────────────────────────────────────────────────
+# ── UI ───────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="United Fire \u2014 Backflow Report", page_icon="\U0001f527", layout="wide")
 st.title("\U0001f527 United Fire \u2014 Backflow Preventer Test Report")
 
@@ -231,7 +231,8 @@ if "form" not in st.session_state:
 
 f = st.session_state.form
 
-col1, col2, col3 = st.columns(3)
+# ── Top action bar ────────────────────────────────────────────────────────────
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     if st.button("\U0001f4be Save Session"):
         save_session(f)
@@ -241,45 +242,62 @@ with col2:
         st.session_state.form = load_session()
         st.rerun()
 with col3:
-    if st.button("\U0001f5d1\ufe0f Clear (keep \u2b50 sticky fields)"):
-        st.session_state.form = {k: v for k, v in f.items() if k in STICKY}
+    # Same job, next backflow — keeps job info + assembly type/service/mfg/model/size
+    if st.button("\u27a1\ufe0f Next Report (same job)", help="Clears test results & serial number. Keeps job info, manufacturer, model, size, assembly type, system service, and tester defaults."):
+        kept = {k: v for k, v in f.items() if k in NEXT_REPORT_KEEP}
         for k, v in STATIC_TESTER_DEFAULTS.items():
-            st.session_state.form.setdefault(k, f.get(k, v))
+            kept.setdefault(k, f.get(k, v))
+        # Reset test result fields and date to today
+        kept["date"] = date.today().strftime("%m/%d/%Y")
+        kept["test_date"] = date.today().strftime("%m/%d/%Y")
+        st.session_state.form = kept
+        st.rerun()
+with col4:
+    # Brand new job — keeps only tester/gauge info
+    if st.button("\U0001f3e2 New Job", help="Clears everything except tester info (gauge, technician, cert). Use this when moving to a new customer/site."):
+        kept = {k: f.get(k, v) for k, v in STATIC_TESTER_DEFAULTS.items()}
+        kept["date"] = date.today().strftime("%m/%d/%Y")
+        kept["test_date"] = date.today().strftime("%m/%d/%Y")
+        st.session_state.form = kept
         st.rerun()
 
 st.divider()
 
+# ── Job Information ───────────────────────────────────────────────────────────
 st.subheader("\U0001f4cb Job Information")
 r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
 f["date"]   = r1c1.text_input("Date", f.get("date", date.today().strftime("%m/%d/%Y")))
-f["branch"] = r1c2.text_input("Branch \u2b50", f.get("branch", ""))
-f["ahj"]    = r1c3.text_input("Authority Having Jurisdiction \u2b50", f.get("ahj", ""))
+f["branch"] = r1c2.text_input("Branch", f.get("branch", ""))
+f["ahj"]    = r1c3.text_input("Authority Having Jurisdiction", f.get("ahj", ""))
 f["customer_name"]  = st.text_input("Customer / Site Name",  f.get("customer_name", ""))
 f["street_address"] = st.text_input("Street Address",         f.get("street_address", ""))
 f["location"]       = st.text_input("Location of Assembly",   f.get("location", ""))
 
 st.divider()
 
+# ── Backflow Assembly ─────────────────────────────────────────────────────────
 st.subheader("\U0001f529 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
-f["serial_number"] = c1.text_input("Serial Number",    f.get("serial_number", ""))
-f["manufacturer"]  = c2.text_input("Manufacturer \u2b50", f.get("manufacturer", ""))
-f["model"]         = c3.text_input("Model \u2b50",          f.get("model", ""))
-f["size"]          = c4.text_input("Size \u2b50",           f.get("size", ""))
+f["serial_number"] = c1.text_input("Serial Number",   f.get("serial_number", ""))
+f["manufacturer"]  = c2.text_input("Manufacturer \u21ba", f.get("manufacturer", ""), help="Kept between reports on the same job")
+f["model"]         = c3.text_input("Model \u21ba",         f.get("model", ""),         help="Kept between reports on the same job")
+f["size"]          = c4.text_input("Size \u21ba",           f.get("size", ""),           help="Kept between reports on the same job")
 
 c1, c2, c3 = st.columns(3)
 asm_opts = ["", "RP", "DC", "PVB", "SVB"]
 f["assembly_type"] = c1.selectbox(
-    "Type of Assembly",
+    "Type of Assembly \u21ba",
     asm_opts,
     index=asm_opts.index(f.get("assembly_type", "")) if f.get("assembly_type", "") in asm_opts else 0,
+    help="Kept between reports on the same job",
 )
 
 ss_opts = ["", "FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]
 f["system_service"] = c2.selectbox(
-    "System Service",
+    "System Service \u21ba",
     ss_opts,
     index=ss_opts.index(f.get("system_service", "")) if f.get("system_service", "") in ss_opts else 0,
+    help="Kept between reports on the same job",
 )
 
 bp_opts = ["", "YES", "NO"]
@@ -291,6 +309,7 @@ f["bypass"] = c3.selectbox(
 
 st.divider()
 
+# ── Testing Information ───────────────────────────────────────────────────────
 st.subheader("\U0001f9ea Testing Information")
 tc1, tc2, tc3, tc4 = st.columns(4)
 
@@ -341,6 +360,7 @@ f["assembly_result"] = tc_r.radio(
 
 st.divider()
 
+# ── Repairs & Remarks ─────────────────────────────────────────────────────────
 st.subheader("\U0001f527 Repairs & Remarks")
 f["repair_desc"] = st.text_area(
     "Description of Repairs / Remarks (including Part #)",
@@ -350,16 +370,17 @@ f["repair_desc"] = st.text_area(
 
 st.divider()
 
+# ── Tester Info / Defaults ────────────────────────────────────────────────────
 with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
     st.caption("These values stay saved and auto-populate each new form. Open only when you need to update them.")
     t1, t2, t3 = st.columns(3)
-    f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer \u2b50", f.get("gauge_mfg", ""))
-    f["gauge_serial"] = t2.text_input("Gauge Serial # \u2b50",     f.get("gauge_serial", ""))
-    f["date_cal"]     = t3.text_input("Date Calibrated \u2b50",    f.get("date_cal", ""))
+    f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer", f.get("gauge_mfg", ""))
+    f["gauge_serial"] = t2.text_input("Gauge Serial #",     f.get("gauge_serial", ""))
+    f["date_cal"]     = t3.text_input("Date Calibrated",    f.get("date_cal", ""))
     t1b, t2b, t3b = st.columns(3)
-    f["technician"] = t1b.text_input("Technician \u2b50",        f.get("technician", ""))
-    f["cert_no"]    = t2b.text_input("Certification No. \u2b50", f.get("cert_no", ""))
-    f["recert"]     = t3b.text_input("Re-Cert Due Date \u2b50",  f.get("recert", ""))
+    f["technician"] = t1b.text_input("Technician",        f.get("technician", ""))
+    f["cert_no"]    = t2b.text_input("Certification No.", f.get("cert_no", ""))
+    f["recert"]     = t3b.text_input("Re-Cert Due Date",  f.get("recert", ""))
 
     st.markdown("---")
     st.markdown("**\u270d\ufe0f Digital Signature**")
@@ -403,19 +424,14 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
 
 st.divider()
 
+# ── Generate PDF ──────────────────────────────────────────────────────────────
 if st.button("\U0001f4c4 Generate & Open PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
             pdf_bytes = generate_pdf(f)
             fname = safe_filename(f.get("customer_name", "Customer"), f.get("street_address", "Address"))
             save_session(f)
-            # Use a base64 data-URI link that iOS Safari can open directly.
-            # The link opens the PDF in a new tab; from there the user taps
-            # the Share icon to save to Files, AirDrop, print, etc.
-            st.markdown(
-                pdf_download_link(pdf_bytes, fname),
-                unsafe_allow_html=True,
-            )
+            st.markdown(pdf_download_link(pdf_bytes, fname), unsafe_allow_html=True)
             st.info(
                 "\U0001f4f1 **iPhone / iPad:** Tap the button above \u2192 PDF opens in a new tab \u2192 "
                 "tap the Share icon (\U0001f4e4) to Save to Files, AirDrop, or print."
