@@ -16,28 +16,28 @@ STICKY = {
 
 # Calibrated from PPTX text box positions mapped to PDF 612x792 coordinate space
 TEXT_FIELDS = {
-    "date":           (100, 581, 8),
-    "branch":         (230, 581, 8),
-    "ahj":            (437, 581, 8),
+    "date":           (115, 583, 8),
+    "branch":         (230, 583, 8),
+    "ahj":            (437, 583, 8),
     "customer_name":  (200, 567, 8),
     "street_address": (200, 551, 8),
     "location":       (200, 533, 8),
     "serial_number":  (200, 507, 8),
     "manufacturer":   (200, 490, 8),
-    "model":          (200, 470, 8),
-    "size":           (388, 507, 8),
+    "model":          (200, 475, 8),
+    "size":           (390, 507, 8),
     "rv_psi":         (275, 387, 7),
-    "cv1_dp":         (141, 321, 8),
+    "cv1_dp":         (170, 321, 8),
     "cv2_dp":         (380, 315, 8),
     "pvb_ai_psi":     (485, 370, 7),
     "pvb_cv_psi":     (485, 315, 7),
-    "test_date":      (132, 290, 8),
-    "gauge_mfg":      (193, 165, 8),
-    "gauge_serial":   (304, 165, 8),
-    "date_cal":       (462, 165, 8),
+    "test_date":      (165, 290, 8),
+    "gauge_mfg":      (215, 175, 8),
+    "gauge_serial":   (310, 175, 8),
+    "date_cal":       (455, 175, 8),
     "technician":     (176, 150, 8),
-    "cert_no":        (405, 150, 8),
-    "recert":         (407, 137, 8),
+    "cert_no":        (407, 165, 8),
+    "recert":         (407, 150, 8),
 }
 
 CHECKBOXES = {
@@ -158,9 +158,9 @@ def generate_pdf(form):
     out.seek(0)
     return out
 
-def safe_filename(customer, address):
+def safe_filename(customer, location):
     def clean(s): return re.sub(r"[^\w\s\-]", "", s).strip()
-    return f"{clean(customer) or 'Customer'} - {clean(address) or 'Address'}.pdf"
+    return f"{clean(customer) or 'Customer'} - {clean(location) or 'location'}.pdf"
 
 def load_session():
     if os.path.exists(SESSION_FILE):
