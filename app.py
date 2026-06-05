@@ -10,8 +10,18 @@ SESSION_FILE  = "session_data.json"
 PAGE_W, PAGE_H = 612, 792
 
 STICKY = {
-    'branch', 'ahj', 'manufacturer', 'model', 'size',
-    'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert'
+    'branch', 'ahj', 'customer_name', 'street_address', 'manufacturer', 'model', 'size',
+    'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert', 'technician_signature'
+}
+
+STATIC_TESTER_DEFAULTS = {
+    'gauge_mfg': '',
+    'gauge_serial': '',
+    'date_cal': '',
+    'technician': '',
+    'cert_no': '',
+    'recert': '',
+    'technician_signature': ''
 }
 
 # Calibrated from PPTX text box positions mapped to PDF 612x792 coordinate space
@@ -55,7 +65,6 @@ CHECKBOXES = {
 }
 
 def draw_x(c, bx, by, size=3.8):
-    # Bold red X
     c.setStrokeColorRGB(1, 0, 0)
     c.setLineWidth(2.0)
     c.line(bx-size, by-size, bx+size, by+size)
@@ -76,6 +85,12 @@ def wrap_text(text, w=38):
     if line: lines.append(line)
     return lines
 
+def draw_signature_line(c, x1, x2, y):
+    c.setStrokeColorRGB(1, 0, 0)
+    c.setLineWidth(1.3)
+    c.line(x1, y, x2, y)
+
+
 def generate_pdf(form):
     if not os.path.exists(TEMPLATE_PATH):
         st.error(f"⚠️ Place **backflow_template.pdf** in the same folder as app.py")
@@ -84,50 +99,42 @@ def generate_pdf(form):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H))
 
-    # Text fields
     for field, (x, y, sz) in TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
 
-    # Assembly type
     asm = form.get("assembly_type", "")
     for key in ["RP", "DC", "PVB", "SVB"]:
         if asm == key: draw_x(c, *CHECKBOXES[key])
 
-    # System service
     ss = form.get("system_service", "")
     for key in ["FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]:
         if ss == key: draw_x(c, *CHECKBOXES[key])
 
-    # Bypass
     bp = form.get("bypass", "")
     if bp == "YES": draw_x(c, *CHECKBOXES["BYPASS_YES"])
     elif bp == "NO": draw_x(c, *CHECKBOXES["BYPASS_NO"])
 
-    # CV1 (no N/A)
     for k in ["CV1_CLOSED", "CV1_LEAKED"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
-    # CV2 (no N/A)
     for k in ["CV2_CLOSED", "CV2_LEAKED"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
-    # PVB/SVB
     for k in ["PVB_AI_CLOSED", "PVB_AI_OPENED", "PVB_CV_LEAKED", "PVB_CV_HELD"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
-    # Relief Valve (no N/A)
-    for k in ["RV_OPENED", "RV_DIDNOTOPEN",
-              "RV_OUT_CLOSED", "RV_OUT_LEAKED", "RV_IN_CLOSED", "RV_IN_LEAKED"]:
+    for k in ["RV_OPENED", "RV_DIDNOTOPEN", "RV_OUT_CLOSED", "RV_OUT_LEAKED", "RV_IN_CLOSED", "RV_IN_LEAKED"]:
         if form.get(k.lower()): draw_x(c, *CHECKBOXES[k])
 
-    # Result
     result = form.get("assembly_result", "")
     if result == "PASSED": draw_x(c, *CHECKBOXES["PASSED"])
     elif result == "FAILED": draw_x(c, *CHECKBOXES["FAILED"])
 
-    # Repair/Remarks text box only
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), 38)[:4]):
         put_text(c, ln, 96, 200 - i * 10, 7)
+
+    draw_signature_line(c, 170, 340, 151)
+    put_text(c, form.get("technician_signature", ""), 176, 153, 8)
 
     c.save(); buf.seek(0)
 
@@ -146,16 +153,20 @@ def safe_filename(customer, location):
     return f"{clean(customer) or 'Customer'} - {clean(location) or 'location'}.pdf"
 
 def load_session():
+    data = {}
     if os.path.exists(SESSION_FILE):
         try:
-            with open(SESSION_FILE) as f: return json.load(f)
-        except: pass
-    return {}
+            with open(SESSION_FILE) as f:
+                data = json.load(f)
+        except:
+            pass
+    for k, v in STATIC_TESTER_DEFAULTS.items():
+        data.setdefault(k, v)
+    return data
 
 def save_session(data):
     with open(SESSION_FILE, "w") as f: json.dump(data, f)
 
-# ── UI ──────────────────────────────────────────────────────────
 st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
 st.title("🔧 United Fire — Backflow Preventer Test Report")
 
@@ -174,11 +185,12 @@ with col2:
 with col3:
     if st.button("🗑️ Clear (keep ⭐ sticky fields)"):
         st.session_state.form = {k: v for k, v in f.items() if k in STICKY}
+        for k, v in STATIC_TESTER_DEFAULTS.items():
+            st.session_state.form.setdefault(k, f.get(k, v))
         st.rerun()
 
 st.divider()
 
-# ── Header fields ──
 st.subheader("📋 Job Information")
 r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
 f["date"]   = r1c1.text_input("Date",  f.get("date", date.today().strftime("%m/%d/%Y")))
@@ -190,7 +202,6 @@ f["location"]       = st.text_input("Location of Assembly",   f.get("location", 
 
 st.divider()
 
-# ── Assembly ──
 st.subheader("🔩 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
 f["serial_number"] = c1.text_input("Serial Number",    f.get("serial_number", ""))
@@ -213,7 +224,6 @@ f["bypass"] = c3.selectbox("Bypass?",
 
 st.divider()
 
-# ── Testing ──
 st.subheader("🧪 Testing Information")
 tc1, tc2, tc3, tc4 = st.columns(4)
 
@@ -262,27 +272,26 @@ f["assembly_result"] = tc_r.radio("This Assembly",
 
 st.divider()
 
-# ── Repairs / Remarks ──
 st.subheader("🔧 Repairs & Remarks")
 f["repair_desc"] = st.text_area("Description of Repairs / Remarks (including Part #)",
     f.get("repair_desc", ""), height=100)
 
 st.divider()
 
-# ── Tester ──
-st.subheader("🧰 Tester Info ⭐ (persists on Clear)")
-t1, t2, t3 = st.columns(3)
-f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer ⭐", f.get("gauge_mfg", ""))
-f["gauge_serial"] = t2.text_input("Gauge Serial # ⭐",     f.get("gauge_serial", ""))
-f["date_cal"]     = t3.text_input("Date Calibrated ⭐",    f.get("date_cal", ""))
-t1b, t2b, t3b = st.columns(3)
-f["technician"] = t1b.text_input("Technician ⭐",         f.get("technician", ""))
-f["cert_no"]    = t2b.text_input("Certification No. ⭐",  f.get("cert_no", ""))
-f["recert"]     = t3b.text_input("Re-Cert Due Date ⭐",   f.get("recert", ""))
+with st.expander("🧰 Tester Info / Defaults", expanded=False):
+    st.caption("These values stay saved and auto-populate each new form. Open only when you need to update them.")
+    t1, t2, t3 = st.columns(3)
+    f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer ⭐", f.get("gauge_mfg", ""))
+    f["gauge_serial"] = t2.text_input("Gauge Serial # ⭐",     f.get("gauge_serial", ""))
+    f["date_cal"]     = t3.text_input("Date Calibrated ⭐",    f.get("date_cal", ""))
+    t1b, t2b, t3b = st.columns(3)
+    f["technician"] = t1b.text_input("Technician ⭐",         f.get("technician", ""))
+    f["cert_no"]    = t2b.text_input("Certification No. ⭐",  f.get("cert_no", ""))
+    f["recert"]     = t3b.text_input("Re-Cert Due Date ⭐",   f.get("recert", ""))
+    f["technician_signature"] = st.text_input("Technician Signature Text ⭐", f.get("technician_signature", ""))
 
 st.divider()
 
-# ── Generate ──
 if st.button("📄 Generate PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
