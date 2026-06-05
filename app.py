@@ -17,14 +17,14 @@ STICKY = {
 # Calibrated from PPTX text box positions mapped to PDF 612x792 coordinate space
 TEXT_FIELDS = {
     "date":           (100, 581, 8),
-    "branch":         (222, 581, 8),
+    "branch":         (230, 581, 8),
     "ahj":            (437, 581, 8),
     "customer_name":  (200, 567, 8),
     "street_address": (175, 551, 8),
     "location":       (176, 535, 8),
     "serial_number":  (174, 520, 8),
-    "manufacturer":   (174, 505, 8),
-    "model":          (175, 485, 8),
+    "manufacturer":   (174, 510, 8),
+    "model":          (175, 495, 8),
     "size":           (388, 520, 8),
     "rv_psi":         (256, 384, 7),
     "cv1_dp":         (141, 321, 8),
