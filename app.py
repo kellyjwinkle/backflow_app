@@ -37,11 +37,11 @@ TEXT_FIELDS = {
     "manufacturer":   (205, 490, 8),
     "model":          (205, 475, 8),
     "size":           (390, 507, 8),
-    "rv_psi":         (290, 398, 8),
-    "cv1_dp":         (180, 321, 8),
-    "cv2_dp":         (380, 312, 8),
-    "pvb_ai_psi":     (490, 375, 8),
-    "pvb_cv_psi":     (490, 320, 8),
+    "rv_psi":         (310, 398, 8),
+    "cv1_dp":         (200, 321, 8),
+    "cv2_dp":         (400, 312, 8),
+    "pvb_ai_psi":     (510, 375, 8),
+    "pvb_cv_psi":     (510, 320, 8),
     "test_date":      (165, 290, 8),
     "gauge_mfg":      (215, 178, 8),
     "gauge_serial":   (313, 178, 8),
@@ -49,6 +49,15 @@ TEXT_FIELDS = {
     "technician":     (176, 150, 8),
     "cert_no":        (407, 165, 8),
     "recert":         (407, 150, 8),
+}
+
+# PSI field keys and their (x, y) text positions — used to draw red boxes
+PSI_FIELDS = {
+    "rv_psi":     (310, 398),
+    "cv1_dp":     (200, 321),
+    "cv2_dp":     (400, 312),
+    "pvb_ai_psi": (510, 375),
+    "pvb_cv_psi": (510, 320),
 }
 
 CHECKBOXES = {
@@ -65,7 +74,8 @@ CHECKBOXES = {
     "PASSED": (360,292), "FAILED": (415,292),
 }
 
-REPAIR_BOX = (290, 225, 10, 5, 40)
+# Repairs/remarks text box: (x, y, line_height, max_lines, wrap_width)
+REPAIR_BOX = (75, 212, 10, 4, 65)
 
 
 def draw_x(c, bx, by, size=3.8):
@@ -75,6 +85,13 @@ def draw_x(c, bx, by, size=3.8):
     c.line(bx+size, by-size, bx-size, by+size)
 
 
+def draw_psi_box(c, x, y, width=30, height=12):
+    """Draw a red rectangle around a PSI value field."""
+    c.setStrokeColorRGB(1, 0, 0)
+    c.setLineWidth(1.2)
+    c.rect(x - 2, y - 3, width, height, stroke=1, fill=0)
+
+
 def put_text(c, val, x, y, sz=8):
     if val:
         c.setFont("Helvetica-Bold", sz)
@@ -82,7 +99,7 @@ def put_text(c, val, x, y, sz=8):
         c.drawString(x, y, str(val))
 
 
-def wrap_text(text, w=40):
+def wrap_text(text, w=65):
     words = text.split()
     lines, line = [], ""
     for word in words:
@@ -110,12 +127,9 @@ def save_signature(img_array):
 
 
 def generate_pdf(form):
-    """Build overlay with ReportLab, merge onto template with pdfrw.
-    pdfrw PdfWriter MUST write to a file path (not BytesIO).
-    We use a named temp file and read back raw bytes.
-    """
+    """Build overlay with ReportLab, merge onto template with pdfrw."""
     if not os.path.exists(TEMPLATE_PATH):
-        st.error("\u26a0\ufe0f Place backflow_template.pdf in the same folder as app.py")
+        st.error("⚠️ Place backflow_template.pdf in the same folder as app.py")
         st.stop()
 
     # 1. Build overlay
@@ -124,6 +138,10 @@ def generate_pdf(form):
 
     for field, (x, y, sz) in TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
+
+    # Draw red boxes around PSI fields (always draw boxes, text inside if value present)
+    for field, (x, y) in PSI_FIELDS.items():
+        draw_psi_box(c, x, y)
 
     for key in ["RP", "DC", "PVB", "SVB"]:
         if form.get("assembly_type") == key:
@@ -169,6 +187,7 @@ def generate_pdf(form):
     if result == "PASSED":   draw_x(c, *CHECKBOXES["PASSED"])
     elif result == "FAILED": draw_x(c, *CHECKBOXES["FAILED"])
 
+    # Repairs/remarks text — positioned at REPAIR_BOX
     rx, ry, rh, rmax, rw = REPAIR_BOX
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
@@ -201,18 +220,18 @@ def generate_pdf(form):
             pass
 
 
-def safe_filename(customer, location):
-    def clean(s): return re.sub(r"[^\w\s\-]", "", s).strip()
-    return f"{clean(customer) or 'Customer'} - {clean(location) or 'location'}.pdf"
+def safe_filename(customer, street, location):
+    def clean(s): return re.sub(r"[^\w\s\-]", "", s or "").strip()
+    parts = [clean(customer) or "Customer",
+             clean(street) or "Address",
+             clean(location) or "Location"]
+    return " - ".join(parts) + ".pdf"
 
 
 def deliver_pdf(pdf_bytes: bytes, filename: str):
-    """Cross-platform PDF delivery.
-    - st.download_button works on Windows, Android Chrome, and desktop browsers.
-    - The iframe data-URI tap link is kept for iOS Safari.
-    """
+    """Cross-platform PDF delivery."""
     st.download_button(
-        label="\U0001f4e5 Download PDF",
+        label="📥 Download PDF",
         data=pdf_bytes,
         file_name=filename,
         mime="application/pdf",
@@ -220,7 +239,6 @@ def deliver_pdf(pdf_bytes: bytes, filename: str):
     )
 
     b64 = base64.b64encode(pdf_bytes).decode()
-    safe_name = filename.replace('"', '')
     html = f"""
     <html><body style="margin:0;padding:4px 0 0 0;font-family:sans-serif;">
       <a href="data:application/pdf;base64,{b64}"
@@ -258,19 +276,18 @@ def save_session(data):
 
 # ── Radio helper ─────────────────────────────────────────────────────────────
 def _radio(label, options, key, form, **kwargs):
-    """Radio with a blank/none first option. Stores selected string in form[key]."""
     opts = [""] + list(options)
     current = form.get(key, "")
     idx = opts.index(current) if current in opts else 0
     chosen = st.radio(label, opts, index=idx, key=key,
-                      format_func=lambda x: "\u2014" if x == "" else x, **kwargs)
+                      format_func=lambda x: "—" if x == "" else x, **kwargs)
     form[key] = chosen
     return chosen
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="United Fire \u2014 Backflow Report", page_icon="\U0001f527", layout="wide")
-st.title("\U0001f527 United Fire \u2014 Backflow Preventer Test Report")
+st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
+st.title("🔧 United Fire — Backflow Preventer Test Report")
 
 if "form" not in st.session_state:
     st.session_state.form = load_session()
@@ -280,15 +297,15 @@ f = st.session_state.form
 # ── Action bar ────────────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    if st.button("\U0001f4be Save Session"):
+    if st.button("💾 Save Session"):
         save_session(f)
         st.success("Saved!")
 with col2:
-    if st.button("\U0001f4c2 Load Session"):
+    if st.button("📂 Load Session"):
         st.session_state.form = load_session()
         st.rerun()
 with col3:
-    if st.button("\u27a1\ufe0f Next Report (same job)"):
+    if st.button("➡️ Next Report (same job)"):
         kept = {k: v for k, v in f.items() if k in NEXT_REPORT_KEEP}
         for k, v in STATIC_TESTER_DEFAULTS.items():
             kept.setdefault(k, f.get(k, v))
@@ -297,7 +314,7 @@ with col3:
         st.session_state.form = kept
         st.rerun()
 with col4:
-    if st.button("\U0001f3e2 New Job"):
+    if st.button("🏢 New Job"):
         kept = {k: f.get(k, v) for k, v in STATIC_TESTER_DEFAULTS.items()}
         kept["date"] = date.today().strftime("%m/%d/%Y")
         kept["test_date"] = date.today().strftime("%m/%d/%Y")
@@ -307,7 +324,7 @@ with col4:
 st.divider()
 
 # ── Job Information ───────────────────────────────────────────────────────────
-st.subheader("\U0001f4cb Job Information")
+st.subheader("📋 Job Information")
 r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
 f["date"]   = r1c1.text_input("Date",   f.get("date",   date.today().strftime("%m/%d/%Y")))
 f["branch"] = r1c2.text_input("Branch", f.get("branch", ""))
@@ -319,22 +336,22 @@ f["location"]       = st.text_input("Location of Assembly",   f.get("location", 
 st.divider()
 
 # ── Backflow Assembly ─────────────────────────────────────────────────────────
-st.subheader("\U0001f529 Backflow Assembly")
+st.subheader("🔩 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
 f["serial_number"] = c1.text_input("Serial Number",      f.get("serial_number", ""))
-f["manufacturer"]  = c2.text_input("Manufacturer \u21ba", f.get("manufacturer", ""))
-f["model"]         = c3.text_input("Model \u21ba",         f.get("model", ""))
-f["size"]          = c4.text_input("Size \u21ba",           f.get("size", ""))
+f["manufacturer"]  = c2.text_input("Manufacturer ↺", f.get("manufacturer", ""))
+f["model"]         = c3.text_input("Model ↺",         f.get("model", ""))
+f["size"]          = c4.text_input("Size ↺",           f.get("size", ""))
 
 c1, c2, c3 = st.columns(3)
 asm_opts = ["", "RP", "DC", "PVB", "SVB"]
 f["assembly_type"] = c1.selectbox(
-    "Type of Assembly \u21ba", asm_opts,
+    "Type of Assembly ↺", asm_opts,
     index=asm_opts.index(f.get("assembly_type", "")) if f.get("assembly_type", "") in asm_opts else 0,
 )
 ss_opts = ["", "FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]
 f["system_service"] = c2.selectbox(
-    "System Service \u21ba", ss_opts,
+    "System Service ↺", ss_opts,
     index=ss_opts.index(f.get("system_service", "")) if f.get("system_service", "") in ss_opts else 0,
 )
 bp_opts = ["", "YES", "NO"]
@@ -346,7 +363,7 @@ f["bypass"] = c3.selectbox(
 st.divider()
 
 # ── Testing Information ───────────────────────────────────────────────────────
-st.subheader("\U0001f9ea Testing Information")
+st.subheader("🧪 Testing Information")
 tc1, tc2, tc3, tc4 = st.columns(4)
 
 with tc1:
@@ -384,13 +401,13 @@ f["assembly_result"] = tc_r.radio(
     "This Assembly", res_opts,
     index=res_opts.index(f.get("assembly_result", "")) if f.get("assembly_result", "") in res_opts else 0,
     horizontal=True,
-    format_func=lambda x: "\u2014" if x == "" else x,
+    format_func=lambda x: "—" if x == "" else x,
 )
 
 st.divider()
 
 # ── Repairs & Remarks ─────────────────────────────────────────────────────────
-st.subheader("\U0001f527 Repairs & Remarks")
+st.subheader("🔧 Repairs & Remarks")
 f["repair_desc"] = st.text_area(
     "Description of Repairs / Remarks (including Part #)",
     f.get("repair_desc", ""),
@@ -400,7 +417,7 @@ f["repair_desc"] = st.text_area(
 st.divider()
 
 # ── Tester Info / Defaults ────────────────────────────────────────────────────
-with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
+with st.expander("🧰 Tester Info / Defaults", expanded=False):
     st.caption("These values stay saved and auto-populate each new form.")
     t1, t2, t3 = st.columns(3)
     f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer", f.get("gauge_mfg", ""))
@@ -412,13 +429,13 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
     f["recert"]     = t3b.text_input("Re-Cert Due Date",  f.get("recert", ""))
 
     st.markdown("---")
-    st.markdown("**\u270d\ufe0f Digital Signature**")
+    st.markdown("**✍️ Digital Signature**")
     sig_exists = os.path.exists(SIG_FILE)
     if sig_exists:
-        st.success("\u2705 Signature saved \u2014 stamps every PDF automatically.")
+        st.success("✅ Signature saved — stamps every PDF automatically.")
         with open(SIG_FILE, "rb") as sf:
             st.image(sf.read(), width=200)
-        if st.button("\U0001f5d1\ufe0f Clear Saved Signature"):
+        if st.button("🗑️ Clear Saved Signature"):
             os.remove(SIG_FILE)
             st.rerun()
     else:
@@ -436,7 +453,7 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
             drawing_mode="freedraw",
             key="sig_canvas",
         )
-        if st.button("\U0001f4be Save Signature"):
+        if st.button("💾 Save Signature"):
             if sig_canvas.image_data is not None:
                 arr = sig_canvas.image_data
                 if arr.max() > 0:
@@ -444,23 +461,24 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
                     st.success("Signature saved!")
                     st.rerun()
                 else:
-                    st.warning("Canvas is empty \u2014 draw your signature first.")
+                    st.warning("Canvas is empty — draw your signature first.")
     except ImportError:
         st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
 
 st.divider()
 
 # ── Generate PDF ──────────────────────────────────────────────────────────────
-if st.button("\U0001f4c4 Generate PDF", type="primary", use_container_width=True):
+if st.button("📄 Generate PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
             pdf_bytes = generate_pdf(f)
             fname = safe_filename(
-                f.get("customer_name", "Customer"),
-                f.get("street_address", "Address"),
+                f.get("customer_name", ""),
+                f.get("street_address", ""),
+                f.get("location", ""),
             )
             save_session(f)
             deliver_pdf(pdf_bytes, fname)
-            st.success(f"\u2705 PDF ready: {fname}")
+            st.success(f"✅ PDF ready: {fname}")
         except Exception as e:
             st.error(f"Error generating PDF: {e}")
