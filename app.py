@@ -2,7 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from io import BytesIO
 from reportlab.pdfgen import canvas
-import json, os, re, base64
+import json, os, re, base64, tempfile
 from datetime import date
 from pdfrw import PdfReader, PdfWriter, PageMerge
 from PIL import Image
@@ -107,8 +107,8 @@ def wrap_text(text, w=40):
 
 def load_signature():
     if os.path.exists(SIG_FILE):
-        with open(SIG_FILE, "rb") as f:
-            return BytesIO(f.read())
+        with open(SIG_FILE, "rb") as fh:
+            return BytesIO(fh.read())
     return None
 
 
@@ -118,12 +118,17 @@ def save_signature(img_array):
 
 
 def generate_pdf(form):
+    """Build overlay with reportlab, merge onto template with pdfrw.
+    pdfrw.PdfWriter MUST write to a file path (not BytesIO), so we use
+    a named temp file and read it back as bytes.
+    """
     if not os.path.exists(TEMPLATE_PATH):
         st.error("\u26a0\ufe0f Place **backflow_template.pdf** in the same folder as app.py")
         st.stop()
 
-    buf = BytesIO()
-    c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H))
+    # --- 1. Build the overlay PDF with reportlab into a BytesIO ---
+    overlay_buf = BytesIO()
+    c = canvas.Canvas(overlay_buf, pagesize=(PAGE_W, PAGE_H))
 
     for field, (x, y, sz) in TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
@@ -153,7 +158,8 @@ def generate_pdf(form):
     for k in ["PVB_AI_CLOSED", "PVB_AI_OPENED", "PVB_CV_LEAKED", "PVB_CV_HELD"]:
         if form.get(k.lower()):
             draw_x(c, *CHECKBOXES[k])
-    for k in ["RV_OPENED", "RV_DIDNOTOPEN", "RV_OUT_CLOSED", "RV_OUT_LEAKED", "RV_IN_CLOSED", "RV_IN_LEAKED"]:
+    for k in ["RV_OPENED", "RV_DIDNOTOPEN", "RV_OUT_CLOSED", "RV_OUT_LEAKED",
+              "RV_IN_CLOSED", "RV_IN_LEAKED"]:
         if form.get(k.lower()):
             draw_x(c, *CHECKBOXES[k])
 
@@ -172,19 +178,31 @@ def generate_pdf(form):
         c.drawImage(sig_buf, 170, 138, width=130, height=28, mask="auto")
 
     c.save()
-    buf.seek(0)
+    overlay_buf.seek(0)
 
+    # --- 2. Merge overlay onto template using pdfrw ---
+    # pdfrw PdfReader can accept a BytesIO directly.
+    # pdfrw PdfWriter.write() ONLY accepts a file path string — NOT BytesIO.
+    # We write to a named temp file and read it back.
     tp = PdfReader(TEMPLATE_PATH)
-    op = PdfReader(buf)
+    op = PdfReader(overlay_buf)
     pg = tp.pages[0]
     PageMerge(pg).add(op.pages[0]).render()
     if pg.Annots:
         pg.Annots = []
-    out = BytesIO()
-    PdfWriter().write(out, tp)
-    out.seek(0)
-    # Return raw bytes so we never hit a seek/position issue
-    return out.read()
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        PdfWriter().write(tmp_path, tp)
+        with open(tmp_path, "rb") as fh:
+            return fh.read()          # return raw bytes
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def safe_filename(customer, location):
@@ -193,21 +211,8 @@ def safe_filename(customer, location):
 
 
 def show_pdf_ios(pdf_bytes: bytes, filename: str):
-    """
-    Render the PDF in a way that works on iOS Safari.
-
-    iOS Safari 16+ blocks:
-      - programmatic window.open() / window.location  (not user-gesture)
-      - <a download> on data: URIs
-      - <a target=_blank> on data: URIs
-
-    What DOES work:
-      - An <a href="data:..." target="_blank"> that the USER taps directly
-        inside an iframe served by st.components.v1.html.
-
-    We embed the link in a tiny self-contained HTML component so the tap
-    originates from a real user gesture inside the iframe, satisfying Safari.
-    """
+    """Embed PDF link in a components iframe so iOS Safari treats
+    the tap as a user-gesture and allows opening in a new tab."""
     b64 = base64.b64encode(pdf_bytes).decode()
     safe_name = filename.replace('"', '')
     html = f"""
@@ -231,8 +236,8 @@ def load_session():
     data = {}
     if os.path.exists(SESSION_FILE):
         try:
-            with open(SESSION_FILE) as f:
-                data = json.load(f)
+            with open(SESSION_FILE) as fh:
+                data = json.load(fh)
         except Exception:
             pass
     for k, v in STATIC_TESTER_DEFAULTS.items():
@@ -241,8 +246,8 @@ def load_session():
 
 
 def save_session(data):
-    with open(SESSION_FILE, "w") as f:
-        json.dump(data, f)
+    with open(SESSION_FILE, "w") as fh:
+        json.dump(data, fh)
 
 
 # ── UI ──────────────────────────────────────────────────────────────
@@ -443,14 +448,12 @@ st.divider()
 if st.button("\U0001f4c4 Generate & Open PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
-            pdf_bytes = generate_pdf(f)   # returns raw bytes now
+            pdf_bytes = generate_pdf(f)          # raw bytes
             fname = safe_filename(
                 f.get("customer_name", "Customer"),
                 f.get("street_address", "Address")
             )
             save_session(f)
-            # Render the tap-to-open link inside an iframe component.
-            # This satisfies iOS Safari's requirement that opens be user-gesture-initiated.
             show_pdf_ios(pdf_bytes, fname)
             st.success(f"\u2705 PDF ready: {fname}")
         except Exception as e:
