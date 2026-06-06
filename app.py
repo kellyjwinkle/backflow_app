@@ -65,7 +65,7 @@ CHECKBOXES = {
     "PASSED": (360,292), "FAILED": (415,292),
 }
 
-REPAIR_BOX = (290, 240, 10, 5, 40)
+REPAIR_BOX = (290, 225, 10, 5, 40)
 
 
 def draw_x(c, bx, by, size=3.8):
