@@ -13,25 +13,17 @@ SESSION_FILE  = "session_data.json"
 SIG_FILE      = "signature.png"
 PAGE_W, PAGE_H = 612, 792
 
-# Fields kept when starting the NEXT report on the same job
 NEXT_REPORT_KEEP = {
     'branch', 'ahj', 'customer_name', 'street_address',
     'manufacturer', 'model', 'size', 'assembly_type', 'system_service',
     'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert',
 }
-
-# Fields kept when starting a BRAND NEW JOB (only tester/gauge info)
 NEW_JOB_KEEP = {
     'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert',
 }
-
 STATIC_TESTER_DEFAULTS = {
-    'gauge_mfg': '',
-    'gauge_serial': '',
-    'date_cal': '',
-    'technician': '',
-    'cert_no': '',
-    'recert': '',
+    'gauge_mfg': '', 'gauge_serial': '', 'date_cal': '',
+    'technician': '', 'cert_no': '', 'recert': '',
 }
 
 TEXT_FIELDS = {
@@ -118,56 +110,64 @@ def save_signature(img_array):
 
 
 def generate_pdf(form):
-    """Build overlay with reportlab, merge onto template with pdfrw.
-    pdfrw.PdfWriter MUST write to a file path (not BytesIO), so we use
-    a named temp file and read it back as bytes.
+    """Build overlay with ReportLab, merge onto template with pdfrw.
+    pdfrw PdfWriter MUST write to a file path (not BytesIO).
+    We use a named temp file and read back raw bytes.
     """
     if not os.path.exists(TEMPLATE_PATH):
-        st.error("\u26a0\ufe0f Place **backflow_template.pdf** in the same folder as app.py")
+        st.error("\u26a0\ufe0f Place backflow_template.pdf in the same folder as app.py")
         st.stop()
 
-    # --- 1. Build the overlay PDF with reportlab into a BytesIO ---
+    # 1. Build overlay
     overlay_buf = BytesIO()
     c = canvas.Canvas(overlay_buf, pagesize=(PAGE_W, PAGE_H))
 
     for field, (x, y, sz) in TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
 
-    asm = form.get("assembly_type", "")
     for key in ["RP", "DC", "PVB", "SVB"]:
-        if asm == key:
+        if form.get("assembly_type") == key:
             draw_x(c, *CHECKBOXES[key])
 
-    ss = form.get("system_service", "")
     for key in ["FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]:
-        if ss == key:
+        if form.get("system_service") == key:
             draw_x(c, *CHECKBOXES[key])
 
     bp = form.get("bypass", "")
-    if bp == "YES":
-        draw_x(c, *CHECKBOXES["BYPASS_YES"])
-    elif bp == "NO":
-        draw_x(c, *CHECKBOXES["BYPASS_NO"])
+    if bp == "YES":  draw_x(c, *CHECKBOXES["BYPASS_YES"])
+    elif bp == "NO": draw_x(c, *CHECKBOXES["BYPASS_NO"])
 
-    for k in ["CV1_CLOSED", "CV1_LEAKED"]:
-        if form.get(k.lower()):
-            draw_x(c, *CHECKBOXES[k])
-    for k in ["CV2_CLOSED", "CV2_LEAKED"]:
-        if form.get(k.lower()):
-            draw_x(c, *CHECKBOXES[k])
-    for k in ["PVB_AI_CLOSED", "PVB_AI_OPENED", "PVB_CV_LEAKED", "PVB_CV_HELD"]:
-        if form.get(k.lower()):
-            draw_x(c, *CHECKBOXES[k])
-    for k in ["RV_OPENED", "RV_DIDNOTOPEN", "RV_OUT_CLOSED", "RV_OUT_LEAKED",
-              "RV_IN_CLOSED", "RV_IN_LEAKED"]:
-        if form.get(k.lower()):
-            draw_x(c, *CHECKBOXES[k])
+    cv1 = form.get("cv1_result", "")
+    if cv1 == "Closed Tight": draw_x(c, *CHECKBOXES["CV1_CLOSED"])
+    elif cv1 == "Leaked":     draw_x(c, *CHECKBOXES["CV1_LEAKED"])
+
+    cv2 = form.get("cv2_result", "")
+    if cv2 == "Closed Tight": draw_x(c, *CHECKBOXES["CV2_CLOSED"])
+    elif cv2 == "Leaked":     draw_x(c, *CHECKBOXES["CV2_LEAKED"])
+
+    rv = form.get("rv_result", "")
+    if rv == "Opened At":      draw_x(c, *CHECKBOXES["RV_OPENED"])
+    elif rv == "Did Not Open": draw_x(c, *CHECKBOXES["RV_DIDNOTOPEN"])
+
+    rvo = form.get("rv_out_result", "")
+    if rvo == "Closed":   draw_x(c, *CHECKBOXES["RV_OUT_CLOSED"])
+    elif rvo == "Leaked": draw_x(c, *CHECKBOXES["RV_OUT_LEAKED"])
+
+    rvi = form.get("rv_in_result", "")
+    if rvi == "Closed":   draw_x(c, *CHECKBOXES["RV_IN_CLOSED"])
+    elif rvi == "Leaked": draw_x(c, *CHECKBOXES["RV_IN_LEAKED"])
+
+    pvb_ai = form.get("pvb_ai_result", "")
+    if pvb_ai == "Closed Tight": draw_x(c, *CHECKBOXES["PVB_AI_CLOSED"])
+    elif pvb_ai == "Opened At":  draw_x(c, *CHECKBOXES["PVB_AI_OPENED"])
+
+    pvb_cv = form.get("pvb_cv_result", "")
+    if pvb_cv == "Leaked":    draw_x(c, *CHECKBOXES["PVB_CV_LEAKED"])
+    elif pvb_cv == "Held At": draw_x(c, *CHECKBOXES["PVB_CV_HELD"])
 
     result = form.get("assembly_result", "")
-    if result == "PASSED":
-        draw_x(c, *CHECKBOXES["PASSED"])
-    elif result == "FAILED":
-        draw_x(c, *CHECKBOXES["FAILED"])
+    if result == "PASSED":   draw_x(c, *CHECKBOXES["PASSED"])
+    elif result == "FAILED": draw_x(c, *CHECKBOXES["FAILED"])
 
     rx, ry, rh, rmax, rw = REPAIR_BOX
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
@@ -180,10 +180,7 @@ def generate_pdf(form):
     c.save()
     overlay_buf.seek(0)
 
-    # --- 2. Merge overlay onto template using pdfrw ---
-    # pdfrw PdfReader can accept a BytesIO directly.
-    # pdfrw PdfWriter.write() ONLY accepts a file path string — NOT BytesIO.
-    # We write to a named temp file and read it back.
+    # 2. Merge onto template via pdfrw (must use temp file path)
     tp = PdfReader(TEMPLATE_PATH)
     op = PdfReader(overlay_buf)
     pg = tp.pages[0]
@@ -193,11 +190,10 @@ def generate_pdf(form):
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp_path = tmp.name
-
     try:
         PdfWriter().write(tmp_path, tp)
         with open(tmp_path, "rb") as fh:
-            return fh.read()          # return raw bytes
+            return fh.read()
     finally:
         try:
             os.unlink(tmp_path)
@@ -210,26 +206,36 @@ def safe_filename(customer, location):
     return f"{clean(customer) or 'Customer'} - {clean(location) or 'location'}.pdf"
 
 
-def show_pdf_ios(pdf_bytes: bytes, filename: str):
-    """Embed PDF link in a components iframe so iOS Safari treats
-    the tap as a user-gesture and allows opening in a new tab."""
+def deliver_pdf(pdf_bytes: bytes, filename: str):
+    """Cross-platform PDF delivery.
+    - st.download_button works on Windows, Android Chrome, and desktop browsers.
+    - The iframe data-URI tap link is kept for iOS Safari.
+    """
+    st.download_button(
+        label="\U0001f4e5 Download PDF",
+        data=pdf_bytes,
+        file_name=filename,
+        mime="application/pdf",
+        use_container_width=True,
+    )
+
     b64 = base64.b64encode(pdf_bytes).decode()
     safe_name = filename.replace('"', '')
     html = f"""
-    <html><body style="margin:0;padding:0;font-family:sans-serif;">
+    <html><body style="margin:0;padding:4px 0 0 0;font-family:sans-serif;">
       <a href="data:application/pdf;base64,{b64}"
          target="_blank"
-         style="display:block;text-align:center;padding:16px;
-                background:#0068c9;color:white;font-size:1.05rem;
+         style="display:block;text-align:center;padding:12px;
+                background:#5a5a5a;color:white;font-size:0.95rem;
                 font-weight:bold;border-radius:8px;text-decoration:none;">
-        &#128196; Open / Save PDF &mdash; {safe_name}
+        &#127760; iOS / iPad: Tap here to open PDF
       </a>
-      <p style="text-align:center;font-size:0.8rem;color:#555;margin-top:8px;">
-        iPhone/iPad: tap above &rarr; PDF opens &rarr; tap Share &#128228; to save or print.
+      <p style="text-align:center;font-size:0.75rem;color:#666;margin-top:6px;">
+        After PDF opens: tap Share &#128228; &rarr; Save to Files or Print.
       </p>
     </body></html>
     """
-    components.html(html, height=100)
+    components.html(html, height=90)
 
 
 def load_session():
@@ -250,7 +256,19 @@ def save_session(data):
         json.dump(data, fh)
 
 
-# ── UI ──────────────────────────────────────────────────────────────
+# ── Radio helper ─────────────────────────────────────────────────────────────
+def _radio(label, options, key, form, **kwargs):
+    """Radio with a blank/none first option. Stores selected string in form[key]."""
+    opts = [""] + list(options)
+    current = form.get(key, "")
+    idx = opts.index(current) if current in opts else 0
+    chosen = st.radio(label, opts, index=idx, key=key,
+                      format_func=lambda x: "\u2014" if x == "" else x, **kwargs)
+    form[key] = chosen
+    return chosen
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="United Fire \u2014 Backflow Report", page_icon="\U0001f527", layout="wide")
 st.title("\U0001f527 United Fire \u2014 Backflow Preventer Test Report")
 
@@ -259,7 +277,7 @@ if "form" not in st.session_state:
 
 f = st.session_state.form
 
-# ── Top action bar ───────────────────────────────────────────────────────────
+# ── Action bar ────────────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     if st.button("\U0001f4be Save Session"):
@@ -270,8 +288,7 @@ with col2:
         st.session_state.form = load_session()
         st.rerun()
 with col3:
-    if st.button("\u27a1\ufe0f Next Report (same job)",
-                 help="Clears test results & serial number. Keeps job info, manufacturer, model, size, assembly type, system service, and tester defaults."):
+    if st.button("\u27a1\ufe0f Next Report (same job)"):
         kept = {k: v for k, v in f.items() if k in NEXT_REPORT_KEEP}
         for k, v in STATIC_TESTER_DEFAULTS.items():
             kept.setdefault(k, f.get(k, v))
@@ -280,8 +297,7 @@ with col3:
         st.session_state.form = kept
         st.rerun()
 with col4:
-    if st.button("\U0001f3e2 New Job",
-                 help="Clears everything except tester info (gauge, technician, cert)."):
+    if st.button("\U0001f3e2 New Job"):
         kept = {k: f.get(k, v) for k, v in STATIC_TESTER_DEFAULTS.items()}
         kept["date"] = date.today().strftime("%m/%d/%Y")
         kept["test_date"] = date.today().strftime("%m/%d/%Y")
@@ -293,12 +309,12 @@ st.divider()
 # ── Job Information ───────────────────────────────────────────────────────────
 st.subheader("\U0001f4cb Job Information")
 r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
-f["date"]   = r1c1.text_input("Date", f.get("date", date.today().strftime("%m/%d/%Y")))
+f["date"]   = r1c1.text_input("Date",   f.get("date",   date.today().strftime("%m/%d/%Y")))
 f["branch"] = r1c2.text_input("Branch", f.get("branch", ""))
 f["ahj"]    = r1c3.text_input("Authority Having Jurisdiction", f.get("ahj", ""))
-f["customer_name"]  = st.text_input("Customer / Site Name",  f.get("customer_name", ""))
+f["customer_name"]  = st.text_input("Customer / Site Name",  f.get("customer_name",  ""))
 f["street_address"] = st.text_input("Street Address",         f.get("street_address", ""))
-f["location"]       = st.text_input("Location of Assembly",   f.get("location", ""))
+f["location"]       = st.text_input("Location of Assembly",   f.get("location",       ""))
 
 st.divider()
 
@@ -306,25 +322,21 @@ st.divider()
 st.subheader("\U0001f529 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
 f["serial_number"] = c1.text_input("Serial Number",      f.get("serial_number", ""))
-f["manufacturer"]  = c2.text_input("Manufacturer \u21ba", f.get("manufacturer", ""), help="Kept between reports on the same job")
-f["model"]         = c3.text_input("Model \u21ba",         f.get("model", ""),         help="Kept between reports on the same job")
-f["size"]          = c4.text_input("Size \u21ba",           f.get("size", ""),           help="Kept between reports on the same job")
+f["manufacturer"]  = c2.text_input("Manufacturer \u21ba", f.get("manufacturer", ""))
+f["model"]         = c3.text_input("Model \u21ba",         f.get("model", ""))
+f["size"]          = c4.text_input("Size \u21ba",           f.get("size", ""))
 
 c1, c2, c3 = st.columns(3)
 asm_opts = ["", "RP", "DC", "PVB", "SVB"]
 f["assembly_type"] = c1.selectbox(
     "Type of Assembly \u21ba", asm_opts,
     index=asm_opts.index(f.get("assembly_type", "")) if f.get("assembly_type", "") in asm_opts else 0,
-    help="Kept between reports on the same job",
 )
-
 ss_opts = ["", "FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]
 f["system_service"] = c2.selectbox(
     "System Service \u21ba", ss_opts,
     index=ss_opts.index(f.get("system_service", "")) if f.get("system_service", "") in ss_opts else 0,
-    help="Kept between reports on the same job",
 )
-
 bp_opts = ["", "YES", "NO"]
 f["bypass"] = c3.selectbox(
     "Bypass?", bp_opts,
@@ -339,38 +351,31 @@ tc1, tc2, tc3, tc4 = st.columns(4)
 
 with tc1:
     st.markdown("**Check Valve #1**")
-    f["cv1_closed"] = st.checkbox("Closed Tight", f.get("cv1_closed", False), key="cv1c")
-    f["cv1_leaked"] = st.checkbox("Leaked",       f.get("cv1_leaked", False), key="cv1l")
-    f["cv1_dp"]     = st.text_input("DP Across CV1 (PSI)", f.get("cv1_dp", ""), key="cv1dp")
+    _radio("CV1 Result", ["Closed Tight", "Leaked"], "cv1_result", f, horizontal=True)
+    f["cv1_dp"] = st.text_input("DP Across CV1 (PSI)", f.get("cv1_dp", ""), key="cv1dp")
 
 with tc2:
     st.markdown("**Relief Valve**")
-    f["rv_opened"]     = st.checkbox("Opened At",    f.get("rv_opened",     False), key="rvo")
-    f["rv_psi"]        = st.text_input("RV PSI",      f.get("rv_psi", ""),          key="rvpsi")
-    f["rv_didnotopen"] = st.checkbox("Did Not Open", f.get("rv_didnotopen", False), key="rvdno")
-    st.markdown("*Outlet Shut-Off*")
-    f["rv_out_closed"] = st.checkbox("Closed", f.get("rv_out_closed", False), key="rvoc")
-    f["rv_out_leaked"] = st.checkbox("Leaked", f.get("rv_out_leaked", False), key="rvol")
-    st.markdown("*Inlet Shut-Off*")
-    f["rv_in_closed"]  = st.checkbox("Closed", f.get("rv_in_closed",  False), key="rvic")
-    f["rv_in_leaked"]  = st.checkbox("Leaked", f.get("rv_in_leaked",  False), key="rvil")
+    _radio("RV Result", ["Opened At", "Did Not Open"], "rv_result", f, horizontal=True)
+    f["rv_psi"] = st.text_input("RV PSI", f.get("rv_psi", ""), key="rvpsi")
+    st.caption("Outlet Shut-Off")
+    _radio("Outlet", ["Closed", "Leaked"], "rv_out_result", f, horizontal=True)
+    st.caption("Inlet Shut-Off")
+    _radio("Inlet", ["Closed", "Leaked"], "rv_in_result", f, horizontal=True)
 
 with tc3:
     st.markdown("**Check Valve #2**")
-    f["cv2_closed"] = st.checkbox("Closed Tight", f.get("cv2_closed", False), key="cv2c")
-    f["cv2_leaked"] = st.checkbox("Leaked",       f.get("cv2_leaked", False), key="cv2l")
-    f["cv2_dp"]     = st.text_input("DP Across CV2 (PSI)", f.get("cv2_dp", ""), key="cv2dp")
+    _radio("CV2 Result", ["Closed Tight", "Leaked"], "cv2_result", f, horizontal=True)
+    f["cv2_dp"] = st.text_input("DP Across CV2 (PSI)", f.get("cv2_dp", ""), key="cv2dp")
 
 with tc4:
     st.markdown("**PVB / SVB**")
     st.caption("Air Inlet")
-    f["pvb_ai_closed"] = st.checkbox("Closed Tight", f.get("pvb_ai_closed", False), key="pvbaic")
-    f["pvb_ai_opened"] = st.checkbox("Opened At",    f.get("pvb_ai_opened", False), key="pvbaio")
-    f["pvb_ai_psi"]    = st.text_input("Air Inlet PSI", f.get("pvb_ai_psi", ""), key="pvbaipsi")
+    _radio("Air Inlet", ["Closed Tight", "Opened At"], "pvb_ai_result", f, horizontal=True)
+    f["pvb_ai_psi"] = st.text_input("Air Inlet PSI", f.get("pvb_ai_psi", ""), key="pvbaipsi")
     st.caption("Check Valve")
-    f["pvb_cv_leaked"] = st.checkbox("Leaked",  f.get("pvb_cv_leaked", False), key="pvbcvl")
-    f["pvb_cv_held"]   = st.checkbox("Held At", f.get("pvb_cv_held",   False), key="pvbcvh")
-    f["pvb_cv_psi"]    = st.text_input("CV PSI", f.get("pvb_cv_psi",   ""),    key="pvbcvpsi")
+    _radio("CV", ["Leaked", "Held At"], "pvb_cv_result", f, horizontal=True)
+    f["pvb_cv_psi"] = st.text_input("CV PSI", f.get("pvb_cv_psi", ""), key="pvbcvpsi")
 
 tc_l, tc_r = st.columns(2)
 f["test_date"] = tc_l.text_input("Test Date", f.get("test_date", date.today().strftime("%m/%d/%Y")))
@@ -379,6 +384,7 @@ f["assembly_result"] = tc_r.radio(
     "This Assembly", res_opts,
     index=res_opts.index(f.get("assembly_result", "")) if f.get("assembly_result", "") in res_opts else 0,
     horizontal=True,
+    format_func=lambda x: "\u2014" if x == "" else x,
 )
 
 st.divider()
@@ -409,14 +415,14 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
     st.markdown("**\u270d\ufe0f Digital Signature**")
     sig_exists = os.path.exists(SIG_FILE)
     if sig_exists:
-        st.success("\u2705 Signature saved \u2014 stamps on every PDF automatically.")
+        st.success("\u2705 Signature saved \u2014 stamps every PDF automatically.")
         with open(SIG_FILE, "rb") as sf:
             st.image(sf.read(), width=200)
         if st.button("\U0001f5d1\ufe0f Clear Saved Signature"):
             os.remove(SIG_FILE)
             st.rerun()
     else:
-        st.info("Draw your signature below then click **Save Signature**.")
+        st.info("Draw your signature below then click Save Signature.")
 
     try:
         from streamlit_drawable_canvas import st_canvas
@@ -445,16 +451,16 @@ with st.expander("\U0001f9f0 Tester Info / Defaults", expanded=False):
 st.divider()
 
 # ── Generate PDF ──────────────────────────────────────────────────────────────
-if st.button("\U0001f4c4 Generate & Open PDF", type="primary", use_container_width=True):
+if st.button("\U0001f4c4 Generate PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
-            pdf_bytes = generate_pdf(f)          # raw bytes
+            pdf_bytes = generate_pdf(f)
             fname = safe_filename(
                 f.get("customer_name", "Customer"),
-                f.get("street_address", "Address")
+                f.get("street_address", "Address"),
             )
             save_session(f)
-            show_pdf_ios(pdf_bytes, fname)
+            deliver_pdf(pdf_bytes, fname)
             st.success(f"\u2705 PDF ready: {fname}")
         except Exception as e:
             st.error(f"Error generating PDF: {e}")
