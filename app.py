@@ -26,6 +26,8 @@ STATIC_TESTER_DEFAULTS = {
     'technician': '', 'cert_no': '', 'recert': '',
 }
 
+# All (x, y) coords are in ReportLab points from bottom-left of page.
+# Page is 612 x 792 pts.
 TEXT_FIELDS = {
     "date":           (135, 583, 8),
     "branch":         (235, 583, 8),
@@ -37,11 +39,12 @@ TEXT_FIELDS = {
     "manufacturer":   (205, 490, 8),
     "model":          (205, 475, 8),
     "size":           (390, 507, 8),
-    "rv_psi":         (310, 398, 8),
-    "cv1_dp":         (200, 321, 8),
-    "cv2_dp":         (400, 312, 8),
-    "pvb_ai_psi":     (510, 375, 8),
-    "pvb_cv_psi":     (510, 320, 8),
+    # PSI text values — shifted left to sit just after the PSI label in each column
+    "rv_psi":         (277, 398, 8),   # Relief Valve "OPENED AT ___ PSI"
+    "cv1_dp":         (168, 321, 8),   # CV1 differential pressure
+    "cv2_dp":         (368, 312, 8),   # CV2 differential pressure
+    "pvb_ai_psi":     (477, 375, 8),   # PVB Air Inlet PSI
+    "pvb_cv_psi":     (477, 320, 8),   # PVB Check Valve PSI
     "test_date":      (165, 290, 8),
     "gauge_mfg":      (215, 178, 8),
     "gauge_serial":   (313, 178, 8),
@@ -51,13 +54,13 @@ TEXT_FIELDS = {
     "recert":         (407, 150, 8),
 }
 
-# PSI field keys and their (x, y) text positions — used to draw red boxes
+# PSI field positions for red box overlay — matches TEXT_FIELDS x,y above
 PSI_FIELDS = {
-    "rv_psi":     (310, 398),
-    "cv1_dp":     (200, 321),
-    "cv2_dp":     (400, 312),
-    "pvb_ai_psi": (510, 375),
-    "pvb_cv_psi": (510, 320),
+    "rv_psi":     (277, 398),
+    "cv1_dp":     (168, 321),
+    "cv2_dp":     (368, 312),
+    "pvb_ai_psi": (477, 375),
+    "pvb_cv_psi": (477, 320),
 }
 
 CHECKBOXES = {
@@ -74,8 +77,11 @@ CHECKBOXES = {
     "PASSED": (360,292), "FAILED": (415,292),
 }
 
-# Repairs/remarks text box: (x, y, line_height, max_lines, wrap_width)
-REPAIR_BOX = (75, 212, 10, 4, 65)
+# Repairs/remarks text box
+# x=210 starts right after "REMARKS / REPAIRS NEEDED:" label
+# y=193 places text on that bottom line of the REPAIRS section
+# line_height=10, max_lines=3, wrap_width=55 chars
+REPAIR_BOX = (210, 193, 10, 3, 55)
 
 
 def draw_x(c, bx, by, size=3.8):
@@ -85,11 +91,11 @@ def draw_x(c, bx, by, size=3.8):
     c.line(bx+size, by-size, bx-size, by+size)
 
 
-def draw_psi_box(c, x, y, width=30, height=12):
+def draw_psi_box(c, x, y, width=28, height=11):
     """Draw a red rectangle around a PSI value field."""
     c.setStrokeColorRGB(1, 0, 0)
-    c.setLineWidth(1.2)
-    c.rect(x - 2, y - 3, width, height, stroke=1, fill=0)
+    c.setLineWidth(1.0)
+    c.rect(x - 2, y - 2, width, height, stroke=1, fill=0)
 
 
 def put_text(c, val, x, y, sz=8):
@@ -99,7 +105,7 @@ def put_text(c, val, x, y, sz=8):
         c.drawString(x, y, str(val))
 
 
-def wrap_text(text, w=65):
+def wrap_text(text, w=55):
     words = text.split()
     lines, line = [], ""
     for word in words:
@@ -132,14 +138,13 @@ def generate_pdf(form):
         st.error("⚠️ Place backflow_template.pdf in the same folder as app.py")
         st.stop()
 
-    # 1. Build overlay
     overlay_buf = BytesIO()
     c = canvas.Canvas(overlay_buf, pagesize=(PAGE_W, PAGE_H))
 
     for field, (x, y, sz) in TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
 
-    # Draw red boxes around PSI fields (always draw boxes, text inside if value present)
+    # Red boxes around PSI fields
     for field, (x, y) in PSI_FIELDS.items():
         draw_psi_box(c, x, y)
 
@@ -187,7 +192,7 @@ def generate_pdf(form):
     if result == "PASSED":   draw_x(c, *CHECKBOXES["PASSED"])
     elif result == "FAILED": draw_x(c, *CHECKBOXES["FAILED"])
 
-    # Repairs/remarks text — positioned at REPAIR_BOX
+    # Repairs/remarks text on the REMARKS / REPAIRS NEEDED line
     rx, ry, rh, rmax, rw = REPAIR_BOX
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
@@ -199,7 +204,6 @@ def generate_pdf(form):
     c.save()
     overlay_buf.seek(0)
 
-    # 2. Merge onto template via pdfrw (must use temp file path)
     tp = PdfReader(TEMPLATE_PATH)
     op = PdfReader(overlay_buf)
     pg = tp.pages[0]
@@ -229,7 +233,6 @@ def safe_filename(customer, street, location):
 
 
 def deliver_pdf(pdf_bytes: bytes, filename: str):
-    """Cross-platform PDF delivery."""
     st.download_button(
         label="📥 Download PDF",
         data=pdf_bytes,
@@ -237,7 +240,6 @@ def deliver_pdf(pdf_bytes: bytes, filename: str):
         mime="application/pdf",
         use_container_width=True,
     )
-
     b64 = base64.b64encode(pdf_bytes).decode()
     html = f"""
     <html><body style="margin:0;padding:4px 0 0 0;font-family:sans-serif;">
@@ -274,7 +276,6 @@ def save_session(data):
         json.dump(data, fh)
 
 
-# ── Radio helper ─────────────────────────────────────────────────────────────
 def _radio(label, options, key, form, **kwargs):
     opts = [""] + list(options)
     current = form.get(key, "")
@@ -285,7 +286,6 @@ def _radio(label, options, key, form, **kwargs):
     return chosen
 
 
-# ── App ───────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
 st.title("🔧 United Fire — Backflow Preventer Test Report")
 
@@ -294,7 +294,6 @@ if "form" not in st.session_state:
 
 f = st.session_state.form
 
-# ── Action bar ────────────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     if st.button("💾 Save Session"):
@@ -323,7 +322,6 @@ with col4:
 
 st.divider()
 
-# ── Job Information ───────────────────────────────────────────────────────────
 st.subheader("📋 Job Information")
 r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
 f["date"]   = r1c1.text_input("Date",   f.get("date",   date.today().strftime("%m/%d/%Y")))
@@ -335,7 +333,6 @@ f["location"]       = st.text_input("Location of Assembly",   f.get("location", 
 
 st.divider()
 
-# ── Backflow Assembly ─────────────────────────────────────────────────────────
 st.subheader("🔩 Backflow Assembly")
 c1, c2, c3, c4 = st.columns(4)
 f["serial_number"] = c1.text_input("Serial Number",      f.get("serial_number", ""))
@@ -362,7 +359,6 @@ f["bypass"] = c3.selectbox(
 
 st.divider()
 
-# ── Testing Information ───────────────────────────────────────────────────────
 st.subheader("🧪 Testing Information")
 tc1, tc2, tc3, tc4 = st.columns(4)
 
@@ -406,7 +402,6 @@ f["assembly_result"] = tc_r.radio(
 
 st.divider()
 
-# ── Repairs & Remarks ─────────────────────────────────────────────────────────
 st.subheader("🔧 Repairs & Remarks")
 f["repair_desc"] = st.text_area(
     "Description of Repairs / Remarks (including Part #)",
@@ -416,7 +411,6 @@ f["repair_desc"] = st.text_area(
 
 st.divider()
 
-# ── Tester Info / Defaults ────────────────────────────────────────────────────
 with st.expander("🧰 Tester Info / Defaults", expanded=False):
     st.caption("These values stay saved and auto-populate each new form.")
     t1, t2, t3 = st.columns(3)
@@ -467,7 +461,6 @@ with st.expander("🧰 Tester Info / Defaults", expanded=False):
 
 st.divider()
 
-# ── Generate PDF ──────────────────────────────────────────────────────────────
 if st.button("📄 Generate PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
