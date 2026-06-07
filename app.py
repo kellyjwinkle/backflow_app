@@ -9,7 +9,6 @@ from PIL import Image
 import numpy as np
 
 TEMPLATE_PATH = "backflow_template.pdf"
-SESSION_FILE  = "session_data.json"
 SIG_FILE      = "signature.png"
 PAGE_W, PAGE_H = 612, 792
 
@@ -21,13 +20,11 @@ NEXT_REPORT_KEEP = {
 NEW_JOB_KEEP = {
     'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert',
 }
-STATIC_TESTER_DEFAULTS = {
-    'gauge_mfg': '', 'gauge_serial': '', 'date_cal': '',
-    'technician': '', 'cert_no': '', 'recert': '',
-}
 
-# All (x, y) coords are in ReportLab points from bottom-left of page.
-# Page is 612 x 792 pts.
+# ---------------------------------------------------------------------------
+# TEXT_FIELDS — (x, y, font_size) in ReportLab points from bottom-left.
+# PSI values are placed as plain bold red text — NO box drawn around them.
+# ---------------------------------------------------------------------------
 TEXT_FIELDS = {
     "date":           (135, 583, 8),
     "branch":         (235, 583, 8),
@@ -39,12 +36,12 @@ TEXT_FIELDS = {
     "manufacturer":   (205, 490, 8),
     "model":          (205, 475, 8),
     "size":           (390, 507, 8),
-    # PSI text values — shifted left to sit just after the PSI label in each column
-    "rv_psi":         (277, 398, 8),   # Relief Valve "OPENED AT ___ PSI"
-    "cv1_dp":         (168, 321, 8),   # CV1 differential pressure
-    "cv2_dp":         (368, 312, 8),   # CV2 differential pressure
-    "pvb_ai_psi":     (477, 375, 8),   # PVB Air Inlet PSI
-    "pvb_cv_psi":     (477, 320, 8),   # PVB Check Valve PSI
+    # PSI values — plain text only, no box
+    "rv_psi":         (305, 398, 8),
+    "cv1_dp":         (155, 332, 8),
+    "cv2_dp":         (355, 332, 8),
+    "pvb_ai_psi":     (490, 375, 8),
+    "pvb_cv_psi":     (490, 323, 8),
     "test_date":      (165, 290, 8),
     "gauge_mfg":      (215, 178, 8),
     "gauge_serial":   (313, 178, 8),
@@ -52,15 +49,6 @@ TEXT_FIELDS = {
     "technician":     (176, 150, 8),
     "cert_no":        (407, 165, 8),
     "recert":         (407, 150, 8),
-}
-
-# PSI field positions for red box overlay — matches TEXT_FIELDS x,y above
-PSI_FIELDS = {
-    "rv_psi":     (277, 398),
-    "cv1_dp":     (168, 321),
-    "cv2_dp":     (368, 312),
-    "pvb_ai_psi": (477, 375),
-    "pvb_cv_psi": (477, 320),
 }
 
 CHECKBOXES = {
@@ -77,11 +65,8 @@ CHECKBOXES = {
     "PASSED": (360,292), "FAILED": (415,292),
 }
 
-# Repairs/remarks text box
-# x=210 starts right after "REMARKS / REPAIRS NEEDED:" label
-# y=193 places text on that bottom line of the REPAIRS section
-# line_height=10, max_lines=3, wrap_width=55 chars
-REPAIR_BOX = (210, 193, 10, 3, 55)
+# Repairs / remarks text placement — on the REMARKS / REPAIRS NEEDED line
+REPAIR_BOX = (193, 213, 10, 3, 58)
 
 
 def draw_x(c, bx, by, size=3.8):
@@ -91,13 +76,6 @@ def draw_x(c, bx, by, size=3.8):
     c.line(bx+size, by-size, bx-size, by+size)
 
 
-def draw_psi_box(c, x, y, width=28, height=11):
-    """Draw a red rectangle around a PSI value field."""
-    c.setStrokeColorRGB(1, 0, 0)
-    c.setLineWidth(1.0)
-    c.rect(x - 2, y - 2, width, height, stroke=1, fill=0)
-
-
 def put_text(c, val, x, y, sz=8):
     if val:
         c.setFont("Helvetica-Bold", sz)
@@ -105,7 +83,7 @@ def put_text(c, val, x, y, sz=8):
         c.drawString(x, y, str(val))
 
 
-def wrap_text(text, w=55):
+def wrap_text(text, w=58):
     words = text.split()
     lines, line = [], ""
     for word in words:
@@ -135,7 +113,7 @@ def save_signature(img_array):
 def generate_pdf(form):
     """Build overlay with ReportLab, merge onto template with pdfrw."""
     if not os.path.exists(TEMPLATE_PATH):
-        st.error("⚠️ Place backflow_template.pdf in the same folder as app.py")
+        st.error("Place backflow_template.pdf in the same folder as app.py")
         st.stop()
 
     overlay_buf = BytesIO()
@@ -143,10 +121,6 @@ def generate_pdf(form):
 
     for field, (x, y, sz) in TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
-
-    # Red boxes around PSI fields
-    for field, (x, y) in PSI_FIELDS.items():
-        draw_psi_box(c, x, y)
 
     for key in ["RP", "DC", "PVB", "SVB"]:
         if form.get("assembly_type") == key:
@@ -192,7 +166,6 @@ def generate_pdf(form):
     if result == "PASSED":   draw_x(c, *CHECKBOXES["PASSED"])
     elif result == "FAILED": draw_x(c, *CHECKBOXES["FAILED"])
 
-    # Repairs/remarks text on the REMARKS / REPAIRS NEEDED line
     rx, ry, rh, rmax, rw = REPAIR_BOX
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
@@ -258,66 +231,56 @@ def deliver_pdf(pdf_bytes: bytes, filename: str):
     components.html(html, height=90)
 
 
-def load_session():
-    data = {}
-    if os.path.exists(SESSION_FILE):
-        try:
-            with open(SESSION_FILE) as fh:
-                data = json.load(fh)
-        except Exception:
-            pass
-    for k, v in STATIC_TESTER_DEFAULTS.items():
-        data.setdefault(k, v)
-    return data
+# ---------------------------------------------------------------------------
+# Multi-user: all state lives in st.session_state (per-browser session).
+# No shared flat JSON file — each connected user gets an isolated session.
+# Tester defaults persist within a session and carry forward between jobs.
+# ---------------------------------------------------------------------------
 
+TESTER_KEYS = ['gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert']
 
-def save_session(data):
-    with open(SESSION_FILE, "w") as fh:
-        json.dump(data, fh)
+def get_tester_defaults():
+    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
 
+def save_tester_defaults(form):
+    st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
 
-def _radio(label, options, key, form, **kwargs):
-    opts = [""] + list(options)
-    current = form.get(key, "")
-    idx = opts.index(current) if current in opts else 0
-    chosen = st.radio(label, opts, index=idx, key=key,
-                      format_func=lambda x: "—" if x == "" else x, **kwargs)
-    form[key] = chosen
-    return chosen
+def init_form():
+    defaults = get_tester_defaults()
+    f = {}
+    f["date"] = date.today().strftime("%m/%d/%Y")
+    f["test_date"] = date.today().strftime("%m/%d/%Y")
+    for k in TESTER_KEYS:
+        f[k] = defaults.get(k, "")
+    return f
 
 
 st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
 st.title("🔧 United Fire — Backflow Preventer Test Report")
 
 if "form" not in st.session_state:
-    st.session_state.form = load_session()
+    st.session_state.form = init_form()
 
 f = st.session_state.form
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 with col1:
-    if st.button("💾 Save Session"):
-        save_session(f)
-        st.success("Saved!")
+    if st.button("➡️ Next Report (same job)"):
+        kept = {k: f.get(k, "") for k in NEXT_REPORT_KEEP}
+        kept["date"] = date.today().strftime("%m/%d/%Y")
+        kept["test_date"] = date.today().strftime("%m/%d/%Y")
+        save_tester_defaults(f)
+        st.session_state.form = kept
+        st.rerun()
 with col2:
-    if st.button("📂 Load Session"):
-        st.session_state.form = load_session()
+    if st.button("🏢 New Job"):
+        save_tester_defaults(f)
+        st.session_state.form = init_form()
         st.rerun()
 with col3:
-    if st.button("➡️ Next Report (same job)"):
-        kept = {k: v for k, v in f.items() if k in NEXT_REPORT_KEEP}
-        for k, v in STATIC_TESTER_DEFAULTS.items():
-            kept.setdefault(k, f.get(k, v))
-        kept["date"] = date.today().strftime("%m/%d/%Y")
-        kept["test_date"] = date.today().strftime("%m/%d/%Y")
-        st.session_state.form = kept
-        st.rerun()
-with col4:
-    if st.button("🏢 New Job"):
-        kept = {k: f.get(k, v) for k, v in STATIC_TESTER_DEFAULTS.items()}
-        kept["date"] = date.today().strftime("%m/%d/%Y")
-        kept["test_date"] = date.today().strftime("%m/%d/%Y")
-        st.session_state.form = kept
+    if st.button("🗑️ Clear Form"):
+        save_tester_defaults(f)
+        st.session_state.form = init_form()
         st.rerun()
 
 st.divider()
@@ -362,15 +325,24 @@ st.divider()
 st.subheader("🧪 Testing Information")
 tc1, tc2, tc3, tc4 = st.columns(4)
 
+def _radio(label, options, key, form, **kwargs):
+    opts = [""] + list(options)
+    current = form.get(key, "")
+    idx = opts.index(current) if current in opts else 0
+    chosen = st.radio(label, opts, index=idx, key=key,
+                      format_func=lambda x: "—" if x == "" else x, **kwargs)
+    form[key] = chosen
+    return chosen
+
 with tc1:
     st.markdown("**Check Valve #1**")
     _radio("CV1 Result", ["Closed Tight", "Leaked"], "cv1_result", f, horizontal=True)
-    f["cv1_dp"] = st.text_input("DP Across CV1 (PSI)", f.get("cv1_dp", ""), key="cv1dp")
+    f["cv1_dp"] = st.text_input("DP (PSI)", f.get("cv1_dp", ""), key="cv1dp")
 
 with tc2:
     st.markdown("**Relief Valve**")
     _radio("RV Result", ["Opened At", "Did Not Open"], "rv_result", f, horizontal=True)
-    f["rv_psi"] = st.text_input("RV PSI", f.get("rv_psi", ""), key="rvpsi")
+    f["rv_psi"] = st.text_input("PSI", f.get("rv_psi", ""), key="rvpsi")
     st.caption("Outlet Shut-Off")
     _radio("Outlet", ["Closed", "Leaked"], "rv_out_result", f, horizontal=True)
     st.caption("Inlet Shut-Off")
@@ -379,16 +351,16 @@ with tc2:
 with tc3:
     st.markdown("**Check Valve #2**")
     _radio("CV2 Result", ["Closed Tight", "Leaked"], "cv2_result", f, horizontal=True)
-    f["cv2_dp"] = st.text_input("DP Across CV2 (PSI)", f.get("cv2_dp", ""), key="cv2dp")
+    f["cv2_dp"] = st.text_input("DP (PSI)", f.get("cv2_dp", ""), key="cv2dp")
 
 with tc4:
     st.markdown("**PVB / SVB**")
     st.caption("Air Inlet")
     _radio("Air Inlet", ["Closed Tight", "Opened At"], "pvb_ai_result", f, horizontal=True)
-    f["pvb_ai_psi"] = st.text_input("Air Inlet PSI", f.get("pvb_ai_psi", ""), key="pvbaipsi")
+    f["pvb_ai_psi"] = st.text_input("PSI", f.get("pvb_ai_psi", ""), key="pvbaipsi")
     st.caption("Check Valve")
     _radio("CV", ["Leaked", "Held At"], "pvb_cv_result", f, horizontal=True)
-    f["pvb_cv_psi"] = st.text_input("CV PSI", f.get("pvb_cv_psi", ""), key="pvbcvpsi")
+    f["pvb_cv_psi"] = st.text_input("PSI", f.get("pvb_cv_psi", ""), key="pvbcvpsi")
 
 tc_l, tc_r = st.columns(2)
 f["test_date"] = tc_l.text_input("Test Date", f.get("test_date", date.today().strftime("%m/%d/%Y")))
@@ -412,28 +384,28 @@ f["repair_desc"] = st.text_area(
 st.divider()
 
 with st.expander("🧰 Tester Info / Defaults", expanded=False):
-    st.caption("These values stay saved and auto-populate each new form.")
+    st.caption("Fill once — carries forward on Next Report and New Job.")
     t1, t2, t3 = st.columns(3)
     f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer", f.get("gauge_mfg", ""))
     f["gauge_serial"] = t2.text_input("Gauge Serial #",     f.get("gauge_serial", ""))
     f["date_cal"]     = t3.text_input("Date Calibrated",    f.get("date_cal", ""))
     t1b, t2b, t3b = st.columns(3)
-    f["technician"] = t1b.text_input("Technician",        f.get("technician", ""))
+    f["technician"] = t1b.text_input("Technician", f.get("technician", ""))
     f["cert_no"]    = t2b.text_input("Certification No.", f.get("cert_no", ""))
     f["recert"]     = t3b.text_input("Re-Cert Due Date",  f.get("recert", ""))
 
     st.markdown("---")
-    st.markdown("**✍️ Digital Signature**")
+    st.markdown("**Saved Signature** — stamps every PDF automatically")
     sig_exists = os.path.exists(SIG_FILE)
     if sig_exists:
-        st.success("✅ Signature saved — stamps every PDF automatically.")
+        st.success("Signature on file.")
         with open(SIG_FILE, "rb") as sf:
             st.image(sf.read(), width=200)
         if st.button("🗑️ Clear Saved Signature"):
             os.remove(SIG_FILE)
             st.rerun()
     else:
-        st.info("Draw your signature below then click Save Signature.")
+        st.info("Draw your signature below then tap Save Signature.")
 
     try:
         from streamlit_drawable_canvas import st_canvas
@@ -464,14 +436,14 @@ st.divider()
 if st.button("📄 Generate PDF", type="primary", use_container_width=True):
     with st.spinner("Building PDF..."):
         try:
+            save_tester_defaults(f)
             pdf_bytes = generate_pdf(f)
             fname = safe_filename(
                 f.get("customer_name", ""),
                 f.get("street_address", ""),
                 f.get("location", ""),
             )
-            save_session(f)
             deliver_pdf(pdf_bytes, fname)
-            st.success(f"✅ PDF ready: {fname}")
+            st.success(f"PDF ready: {fname}")
         except Exception as e:
             st.error(f"Error generating PDF: {e}")
