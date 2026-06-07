@@ -37,12 +37,12 @@ TEXT_FIELDS = {
     "model":          (205, 475, 8),
     "size":           (390, 507, 8),
     # PSI values — plain text only, no box
-    "rv_psi":         (305, 398, 8),
-    "cv1_dp":         (155, 332, 8),
-    "cv2_dp":         (355, 332, 8),
-    "pvb_ai_psi":     (490, 375, 8),
-    "pvb_cv_psi":     (490, 323, 8),
-    "test_date":      (165, 290, 8),
+    "rv_psi":         (300, 398, 8),
+    "cv1_dp":         (180, 320, 8),
+    "cv2_dp":         (395, 320, 8),
+    "pvb_ai_psi":     (495, 378, 8),
+    "pvb_cv_psi":     (495, 320, 8),
+    "test_date":      (168, 290, 8),
     "gauge_mfg":      (215, 178, 8),
     "gauge_serial":   (313, 178, 8),
     "date_cal":       (455, 178, 8),
@@ -66,7 +66,7 @@ CHECKBOXES = {
 }
 
 # Repairs / remarks text placement — on the REMARKS / REPAIRS NEEDED line
-REPAIR_BOX = (193, 213, 10, 3, 58)
+REPAIR_BOX = (225, 205, 10, 3, 58)
 
 
 def draw_x(c, bx, by, size=3.8):
