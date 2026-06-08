@@ -76,78 +76,79 @@ UNITED_NEW_JOB_KEEP = {
 # Jacksonville (JEA) form config
 # ---------------------------------------------------------------------------
 JAX_TEXT_FIELDS = {
-    "premises_name":    (151.4, 671.9, 8),
-    "owner_name":       (447.5, 671.9, 8),
-    "service_address":  (151.4, 636.2, 8),
-    "mailing_address":  (447.5, 636.2, 8),
-    "physical_location":(151.4, 597.2, 8),
-    "contact_phone":    (447.5, 597.2, 8),
-    "jea_account":      (151.4, 561.5, 8),
-    "meter_number":     (447.5, 561.5, 8),
-    "device_type":      (49.4,  438.2, 8),
-    "manufacturer":     (131.6, 438.2, 8),
-    "size":             (207.3, 438.2, 8),
-    "model_number":     (273.1, 438.2, 8),
-    "serial_number":    (381.7, 438.2, 8),
-    "install_date":     (500.1, 438.2, 8),
-    "init_cv1_psi":     (164.5, 350.6, 8),
-    "init_cv2_psi":     (283.0, 350.6, 8),
-    "init_rv_psi":      (388.3, 357.0, 8),
-    "init_pvb_psi":     (519.9, 358.3, 8),
-    "final_cv1_psi":    (164.5, 305.1, 8),
-    "final_cv2_psi":    (283.0, 305.1, 8),
-    "repairs":          (263.2, 227.2, 8),
-    "init_tester_name": (52.6,  168.8, 8),
-    "init_company":     (184.3, 168.8, 8),
-    "init_cert":        (368.5, 168.8, 8),
-    "init_test_date":   (506.7, 168.8, 8),
-    "repaired_by":      (52.6,  142.8, 8),
-    "repair_company":   (184.3, 142.8, 8),
-    "repair_cert":      (368.5, 142.8, 8),
-    "repair_date":      (506.7, 142.8, 8),
-    "final_tester_name":(52.6,  116.9, 8),
-    "final_company":    (184.3, 116.9, 8),
-    "final_cert":       (368.5, 116.9, 8),
-    "final_test_date":  (506.7, 116.9, 8),
-    "signature_date":   (473.8,  64.9, 8),
+    "premises_name":        (101, 654, 9),
+    "owner_name":           (339, 657, 9),
+    "service_address":      ( 99, 616, 9),
+    "mailing_address":      (339, 616, 9),
+    "physical_location":    ( 96, 576, 9),
+    "contact_phone":        (338, 576, 9),
+    "jea_account":          ( 98, 534, 9),
+    "meter_number":         (336, 533, 9),
+    "device_type":          ( 88, 394, 9),
+    "manufacturer":         (151, 396, 9),
+    "size":                 (239, 395, 9),
+    "model_number":         (283, 396, 9),
+    "serial_number":        (368, 398, 9),
+    "install_date":         (468, 399, 9),
+    "init_cv1_psi":         (148, 317, 9),
+    "init_cv2_psi":         (248, 316, 9),
+    "init_rv_psi":          (402, 334, 9),   # DP RV Initial: Opened at (PSI value)
+    "init_pvb_psi":         (479, 316, 9),   # Air Inlet Opened At (PSI value)
+    "final_cv1_psi":        (167, 264, 9),
+    "final_cv2_psi":        (269, 266, 9),
+    "final_rv_psi":         (414, 283, 9),
+    "repairs":              ( 96, 231, 9),
+    "init_tester_name":     ( 93, 174, 9),
+    "init_company":         (240, 174, 9),
+    "init_cert":            (358, 175, 9),
+    "init_test_date":       (471, 176, 9),
+    "repaired_by":          ( 91, 150, 9),
+    "repair_company":       (239, 151, 9),
+    "repair_cert":          (357, 150, 9),
+    "repair_date":          (474, 150, 9),
+    "final_tester_name":    ( 91, 126, 9),
+    "final_company":        (239, 127, 9),
+    "final_cert":           (358, 127, 9),
+    "final_test_date":      (474, 128, 9),
+    "signature_date":       (448,  81, 9),
 }
 
-JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 52.6, 52.0, 160, 22
+JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 161, 82, 160, 22
 
 JAX_CHECKBOXES = {
-    "COMM_ANNUAL":       (176.4, 522.6),
-    "COMM_REPAIR":       (236.9, 522.6),
-    "COMM_REPLACEMENT":  (306.0, 522.6),
-    "COMM_NEW_INSTALL":  (408.0, 522.6),
-    "COMM_FIRE":         (176.4, 509.6),
-    "COMM_IRRIGATION":   (243.5, 509.6),
-    "COMM_PROCESS":      (306.0, 509.6),
-    "COMM_POTABLE":      (408.0, 509.6),
-    "COMM_FIRE_BYPASS":  (176.4, 496.6),
-    "RECLAIM_YES":       (388.3, 496.6),
-    "RECLAIM_NO":        (421.2, 496.6),
-    "RES_ANNUAL":        (176.4, 483.6),
-    "RES_REPAIR":        (236.9, 483.6),
-    "RES_REPLACEMENT":   (306.0, 483.6),
-    "RES_NEW_INSTALL":   (408.0, 483.6),
-    "RES_POTABLE":       (176.4, 470.7),
-    "RES_IRRIGATION":    (240.2, 470.7),
-    "RES_RECLAIM_YES":   (388.3, 470.7),
-    "RES_RECLAIM_NO":    (421.2, 470.7),
-    "INIT_CV1_CLOSED":   (141.5, 363.5),
-    "INIT_CV1_LEAKED":   (141.5, 340.8),
-    "INIT_CV2_CLOSED":   (256.6, 363.5),
-    "INIT_CV2_LEAKED":   (256.6, 340.8),
-    "INIT_RV_OPENED":    (361.9, 363.5),
-    "INIT_RV_DIDNOT":    (361.9, 340.8),
-    "INIT_PVB_AIOPEN":   (487.0, 363.5),
-    "INIT_PVB_AIDNOT":   (487.0, 340.8),
-    "FINAL_CV1_CLOSED":  (141.5, 314.9),
-    "FINAL_CV2_CLOSED":  (256.6, 314.9),
-    "FINAL_RV_OPENED":   (361.9, 314.9),
-    "FINAL_PVB_SAT":     (487.0, 311.6),
-    "JAX_PASSED":        (408.0,  71.4),
-    "JAX_FAILED":        (437.6,  71.4),
+    "COMM_ANNUAL":          (220, 513),
+    "COMM_REPAIR":          (293, 513),
+    "COMM_REPLACEMENT":     (366, 513),
+    "COMM_NEW_INSTALL":     (475, 513),
+    "COMM_FIRE":            (220, 492),
+    "COMM_IRRIGATION":      (300, 489),
+    "COMM_PROCESS":         (372, 492),
+    "COMM_POTABLE":         (484, 491),
+    "COMM_FIRE_BYPASS":     (220, 480),
+    "RECLAIM_YES":          (432, 481),
+    "RECLAIM_NO":           (471, 481),
+    "RES_ANNUAL":           (216, 459),
+    "RES_REPAIR":           (289, 458),
+    "RES_REPLACEMENT":      (367, 458),
+    "RES_NEW_INSTALL":      (474, 459),
+    "RES_POTABLE":          (208, 438),
+    "RES_IRRIGATION":       (259, 437),
+    "RES_RECLAIM_YES":      (445, 437),
+    "RES_RECLAIM_NO":       (483, 439),
+    "INIT_CV1_CLOSED":      (143, 341),
+    "INIT_CV1_LEAKED":      (142, 304),
+    "INIT_CV2_CLOSED":      (242, 340),
+    "INIT_CV2_LEAKED":      (242, 304),
+    "INIT_RV_OPENED":       (341, 335),   # DP RV Initial: Opened at (checkbox)
+    "INIT_RV_DIDNOT":       (344, 309),
+    "INIT_PVB_AIOPEN":      (458, 336),   # Air Inlet Opened At (checkbox)
+    "INIT_PVB_AIDNOT":      (462, 303),
+    "FINAL_CV1_CLOSED":     (142, 286),
+    "FINAL_CV2_CLOSED":     (241, 286),
+    "FINAL_RV_OPENED":      (340, 279),
+    "FINAL_PVB_SAT":        (462, 272),
+    "JAX_PASSED":           (310, 100),
+    "JAX_FAILED":           (370, 100),
 }
 
 JAX_NEXT_REPORT_KEEP = {
@@ -784,7 +785,7 @@ else:
         f["init_rv_psi"] = st.text_input("lbs reduced pressure", f.get("init_rv_psi",""), key="j_irvp")
 
     with it4:
-        st.markdown("**Pressure Vacuum Breaker**")
+        st.markdown("**Pressure Vacuum Breaker / Air Inlet**")
         _radio("Result", ["Air inlet opened at","Did not open"], "init_pvb_result", f, horizontal=True)
         f["init_pvb_psi"] = st.text_input("psi", f.get("init_pvb_psi",""), key="j_ipvbp")
 
@@ -809,6 +810,7 @@ else:
     with ft3:
         st.markdown("**Relief Valve**")
         _radio("Result", ["Opened At"], "final_rv_result", f, horizontal=True)
+        f["final_rv_psi"] = st.text_input("lbs reduced pressure", f.get("final_rv_psi",""), key="j_frvp")
 
     with ft4:
         st.markdown("**PVB**")
