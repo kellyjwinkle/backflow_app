@@ -9,6 +9,7 @@ from PIL import Image
 import numpy as np
 
 TEMPLATE_PATH = "backflow_template.pdf"
+SIG_FILE      = "signature_b64.txt"   # persisted base64 PNG
 PAGE_W, PAGE_H = 612, 792
 
 NEXT_REPORT_KEEP = {
@@ -94,20 +95,44 @@ def wrap_text(text, w=58):
     return lines
 
 
-def get_signature_buf():
-    """Return a BytesIO of the saved signature PNG from session_state, or None."""
-    sig_b64 = st.session_state.get("signature_b64")
-    if sig_b64:
-        return BytesIO(base64.b64decode(sig_b64))
-    return None
+# ---------------------------------------------------------------------------
+# Signature helpers — persist to disk, load into session_state on startup
+# ---------------------------------------------------------------------------
+
+def _load_sig_from_disk():
+    """Read saved base64 PNG from disk into session_state (once per session)."""
+    if "sig_loaded" not in st.session_state:
+        st.session_state["sig_loaded"] = True
+        if os.path.exists(SIG_FILE):
+            with open(SIG_FILE, "r") as fh:
+                data = fh.read().strip()
+            if data:
+                st.session_state["signature_b64"] = data
 
 
-def save_signature_to_session(img_array):
-    """Convert RGBA numpy array to PNG bytes and store as base64 in session_state."""
+def save_signature(img_array):
+    """Convert RGBA numpy array → PNG → base64, store in session_state AND disk."""
     buf = BytesIO()
     img = Image.fromarray(img_array.astype("uint8"), "RGBA")
     img.save(buf, format="PNG")
-    st.session_state["signature_b64"] = base64.b64encode(buf.getvalue()).decode()
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    st.session_state["signature_b64"] = b64
+    with open(SIG_FILE, "w") as fh:
+        fh.write(b64)
+
+
+def clear_signature():
+    st.session_state.pop("signature_b64", None)
+    if os.path.exists(SIG_FILE):
+        os.remove(SIG_FILE)
+
+
+def get_signature_buf():
+    """Return BytesIO of saved signature PNG, or None."""
+    b64 = st.session_state.get("signature_b64")
+    if b64:
+        return BytesIO(base64.b64decode(b64))
+    return None
 
 
 def generate_pdf(form):
@@ -170,7 +195,6 @@ def generate_pdf(form):
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
 
-    # Signature — loaded from session_state (works on all platforms / iPad)
     sig_buf = get_signature_buf()
     if sig_buf:
         c.drawImage(sig_buf, 170, 138, width=130, height=28, mask="auto")
@@ -259,6 +283,10 @@ def init_form():
 # ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
+
+# Load persisted signature into session_state on first run
+_load_sig_from_disk()
+
 st.title("🔧 United Fire — Backflow Preventer Test Report")
 
 if "form" not in st.session_state:
@@ -387,21 +415,21 @@ f["repair_desc"] = st.text_area(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Signature — always visible, outside expander, stored in session_state
+# Signature — always visible, persisted to disk across sessions
 # ---------------------------------------------------------------------------
 st.subheader("✍️ Technician Signature")
 
-sig_exists = "signature_b64" in st.session_state and st.session_state["signature_b64"]
+sig_exists = bool(st.session_state.get("signature_b64"))
 
 if sig_exists:
-    st.success("Signature on file — will stamp every PDF.")
+    st.success("Signature on file — will stamp every PDF automatically.")
     sig_preview = BytesIO(base64.b64decode(st.session_state["signature_b64"]))
     st.image(sig_preview, width=200)
     if st.button("🗑️ Clear Saved Signature"):
-        del st.session_state["signature_b64"]
+        clear_signature()
         st.rerun()
 else:
-    st.info("Draw your signature below, then tap **Save Signature**.")
+    st.info("Draw your signature below, then tap **Save Signature**. It will be remembered for future sessions.")
 
 try:
     from streamlit_drawable_canvas import st_canvas
@@ -419,8 +447,8 @@ try:
         if sig_canvas.image_data is not None:
             arr = sig_canvas.image_data
             if arr.max() > 0:
-                save_signature_to_session(arr)
-                st.success("Signature saved!")
+                save_signature(arr)
+                st.success("Signature saved and will persist across sessions!")
                 st.rerun()
             else:
                 st.warning("Canvas is empty — draw your signature first.")
