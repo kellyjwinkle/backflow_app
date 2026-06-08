@@ -42,10 +42,13 @@ TEXT_FIELDS = {
     "gauge_mfg":      (215, 178, 8),
     "gauge_serial":   (313, 178, 8),
     "date_cal":       (455, 178, 8),
-    "technician":     (176, 150, 8),
+    "technician":     (176, 155, 8),   # name printed on the Technician line
     "cert_no":        (407, 165, 8),
     "recert":         (407, 150, 8),
 }
+
+# Signature image placed below the technician name line
+SIG_X, SIG_Y, SIG_W, SIG_H = 170, 118, 130, 28
 
 CHECKBOXES = {
     "RP": (210,460), "DC": (270,460), "PVB": (210,441), "SVB": (270,441),
@@ -124,7 +127,6 @@ def clear_signature():
 
 
 def get_signature_image_reader():
-    """Return a ReportLab ImageReader for the saved signature, or None."""
     b64 = st.session_state.get("signature_b64")
     if b64:
         buf = BytesIO(base64.b64decode(b64))
@@ -192,10 +194,10 @@ def generate_pdf(form):
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
 
-    # Use ImageReader so ReportLab accepts the BytesIO correctly
+    # Signature image sits below the printed technician name
     sig_ir = get_signature_image_reader()
     if sig_ir:
-        c.drawImage(sig_ir, 170, 138, width=130, height=28, mask="auto")
+        c.drawImage(sig_ir, SIG_X, SIG_Y, width=SIG_W, height=SIG_H, mask="auto")
 
     c.save()
     overlay_buf.seek(0)
