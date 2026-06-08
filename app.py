@@ -2,6 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from io import BytesIO
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 import json, os, re, base64, tempfile
 from datetime import date
 from pdfrw import PdfReader, PdfWriter, PageMerge
@@ -9,7 +10,7 @@ from PIL import Image
 import numpy as np
 
 TEMPLATE_PATH = "backflow_template.pdf"
-SIG_FILE      = "signature_b64.txt"   # persisted base64 PNG
+SIG_FILE      = "signature_b64.txt"
 PAGE_W, PAGE_H = 612, 792
 
 NEXT_REPORT_KEEP = {
@@ -21,9 +22,6 @@ NEW_JOB_KEEP = {
     'gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert',
 }
 
-# ---------------------------------------------------------------------------
-# TEXT_FIELDS — (x, y, font_size) in ReportLab points from bottom-left.
-# ---------------------------------------------------------------------------
 TEXT_FIELDS = {
     "date":           (135, 583, 8),
     "branch":         (235, 583, 8),
@@ -96,11 +94,10 @@ def wrap_text(text, w=58):
 
 
 # ---------------------------------------------------------------------------
-# Signature helpers — persist to disk, load into session_state on startup
+# Signature helpers
 # ---------------------------------------------------------------------------
 
 def _load_sig_from_disk():
-    """Read saved base64 PNG from disk into session_state (once per session)."""
     if "sig_loaded" not in st.session_state:
         st.session_state["sig_loaded"] = True
         if os.path.exists(SIG_FILE):
@@ -111,7 +108,6 @@ def _load_sig_from_disk():
 
 
 def save_signature(img_array):
-    """Convert RGBA numpy array → PNG → base64, store in session_state AND disk."""
     buf = BytesIO()
     img = Image.fromarray(img_array.astype("uint8"), "RGBA")
     img.save(buf, format="PNG")
@@ -127,16 +123,17 @@ def clear_signature():
         os.remove(SIG_FILE)
 
 
-def get_signature_buf():
-    """Return BytesIO of saved signature PNG, or None."""
+def get_signature_image_reader():
+    """Return a ReportLab ImageReader for the saved signature, or None."""
     b64 = st.session_state.get("signature_b64")
     if b64:
-        return BytesIO(base64.b64decode(b64))
+        buf = BytesIO(base64.b64decode(b64))
+        buf.seek(0)
+        return ImageReader(buf)
     return None
 
 
 def generate_pdf(form):
-    """Build overlay with ReportLab, merge onto template with pdfrw."""
     if not os.path.exists(TEMPLATE_PATH):
         st.error("Place backflow_template.pdf in the same folder as app.py")
         st.stop()
@@ -195,9 +192,10 @@ def generate_pdf(form):
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
 
-    sig_buf = get_signature_buf()
-    if sig_buf:
-        c.drawImage(sig_buf, 170, 138, width=130, height=28, mask="auto")
+    # Use ImageReader so ReportLab accepts the BytesIO correctly
+    sig_ir = get_signature_image_reader()
+    if sig_ir:
+        c.drawImage(sig_ir, 170, 138, width=130, height=28, mask="auto")
 
     c.save()
     overlay_buf.seek(0)
@@ -284,7 +282,6 @@ def init_form():
 
 st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
 
-# Load persisted signature into session_state on first run
 _load_sig_from_disk()
 
 st.title("🔧 United Fire — Backflow Preventer Test Report")
@@ -415,7 +412,7 @@ f["repair_desc"] = st.text_area(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Signature — always visible, persisted to disk across sessions
+# Signature
 # ---------------------------------------------------------------------------
 st.subheader("✍️ Technician Signature")
 
@@ -458,7 +455,7 @@ except ImportError:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Tester Info (collapsed — auto-populates from session defaults)
+# Tester Info
 # ---------------------------------------------------------------------------
 with st.expander("🧰 Tester Info / Defaults", expanded=False):
     st.caption("Fill once — carries forward on Next Report and New Job.")
