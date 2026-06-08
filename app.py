@@ -38,8 +38,8 @@ TEXT_FIELDS = {
     "size":           (390, 507, 8),
     # PSI values — plain text only, no box
     "rv_psi":         (300, 398, 8),
-    "cv1_dp":         (180, 320, 8),
-    "cv2_dp":         (395, 320, 8),
+    "cv1_dp":         (183, 320, 8),
+    "cv2_dp":         (395, 312, 8),
     "pvb_ai_psi":     (495, 378, 8),
     "pvb_cv_psi":     (495, 320, 8),
     "test_date":      (168, 290, 8),
@@ -66,7 +66,7 @@ CHECKBOXES = {
 }
 
 # Repairs / remarks text placement — on the REMARKS / REPAIRS NEEDED line
-REPAIR_BOX = (225, 205, 10, 3, 58)
+REPAIR_BOX = (228, 200, 10, 3, 70)
 
 
 def draw_x(c, bx, by, size=3.8):
