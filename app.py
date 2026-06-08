@@ -9,7 +9,6 @@ from PIL import Image
 import numpy as np
 
 TEMPLATE_PATH = "backflow_template.pdf"
-SIG_FILE      = "signature.png"
 PAGE_W, PAGE_H = 612, 792
 
 NEXT_REPORT_KEEP = {
@@ -23,7 +22,6 @@ NEW_JOB_KEEP = {
 
 # ---------------------------------------------------------------------------
 # TEXT_FIELDS — (x, y, font_size) in ReportLab points from bottom-left.
-# PSI values are placed as plain bold red text — NO box drawn around them.
 # ---------------------------------------------------------------------------
 TEXT_FIELDS = {
     "date":           (135, 583, 8),
@@ -36,7 +34,6 @@ TEXT_FIELDS = {
     "manufacturer":   (205, 490, 8),
     "model":          (205, 475, 8),
     "size":           (390, 507, 8),
-    # PSI values — plain text only, no box
     "rv_psi":         (300, 398, 8),
     "cv1_dp":         (183, 320, 8),
     "cv2_dp":         (395, 312, 8),
@@ -65,7 +62,6 @@ CHECKBOXES = {
     "PASSED": (360,292), "FAILED": (415,292),
 }
 
-# Repairs / remarks text placement — on the REMARKS / REPAIRS NEEDED line
 REPAIR_BOX = (228, 200, 10, 3, 70)
 
 
@@ -98,16 +94,20 @@ def wrap_text(text, w=58):
     return lines
 
 
-def load_signature():
-    if os.path.exists(SIG_FILE):
-        with open(SIG_FILE, "rb") as fh:
-            return BytesIO(fh.read())
+def get_signature_buf():
+    """Return a BytesIO of the saved signature PNG from session_state, or None."""
+    sig_b64 = st.session_state.get("signature_b64")
+    if sig_b64:
+        return BytesIO(base64.b64decode(sig_b64))
     return None
 
 
-def save_signature(img_array):
+def save_signature_to_session(img_array):
+    """Convert RGBA numpy array to PNG bytes and store as base64 in session_state."""
+    buf = BytesIO()
     img = Image.fromarray(img_array.astype("uint8"), "RGBA")
-    img.save(SIG_FILE)
+    img.save(buf, format="PNG")
+    st.session_state["signature_b64"] = base64.b64encode(buf.getvalue()).decode()
 
 
 def generate_pdf(form):
@@ -170,7 +170,8 @@ def generate_pdf(form):
     for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
         put_text(c, ln, rx, ry - i * rh, 7)
 
-    sig_buf = load_signature()
+    # Signature — loaded from session_state (works on all platforms / iPad)
+    sig_buf = get_signature_buf()
     if sig_buf:
         c.drawImage(sig_buf, 170, 138, width=130, height=28, mask="auto")
 
@@ -232,9 +233,7 @@ def deliver_pdf(pdf_bytes: bytes, filename: str):
 
 
 # ---------------------------------------------------------------------------
-# Multi-user: all state lives in st.session_state (per-browser session).
-# No shared flat JSON file — each connected user gets an isolated session.
-# Tester defaults persist within a session and carry forward between jobs.
+# Session state / form helpers
 # ---------------------------------------------------------------------------
 
 TESTER_KEYS = ['gauge_mfg', 'gauge_serial', 'date_cal', 'technician', 'cert_no', 'recert']
@@ -254,6 +253,10 @@ def init_form():
         f[k] = defaults.get(k, "")
     return f
 
+
+# ---------------------------------------------------------------------------
+# App layout
+# ---------------------------------------------------------------------------
 
 st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
 st.title("🔧 United Fire — Backflow Preventer Test Report")
@@ -383,6 +386,52 @@ f["repair_desc"] = st.text_area(
 
 st.divider()
 
+# ---------------------------------------------------------------------------
+# Signature — always visible, outside expander, stored in session_state
+# ---------------------------------------------------------------------------
+st.subheader("✍️ Technician Signature")
+
+sig_exists = "signature_b64" in st.session_state and st.session_state["signature_b64"]
+
+if sig_exists:
+    st.success("Signature on file — will stamp every PDF.")
+    sig_preview = BytesIO(base64.b64decode(st.session_state["signature_b64"]))
+    st.image(sig_preview, width=200)
+    if st.button("🗑️ Clear Saved Signature"):
+        del st.session_state["signature_b64"]
+        st.rerun()
+else:
+    st.info("Draw your signature below, then tap **Save Signature**.")
+
+try:
+    from streamlit_drawable_canvas import st_canvas
+    sig_canvas = st_canvas(
+        fill_color="rgba(0,0,0,0)",
+        stroke_width=2,
+        stroke_color="#cc0000",
+        background_color="#ffffff",
+        height=80,
+        width=300,
+        drawing_mode="freedraw",
+        key="sig_canvas",
+    )
+    if st.button("💾 Save Signature"):
+        if sig_canvas.image_data is not None:
+            arr = sig_canvas.image_data
+            if arr.max() > 0:
+                save_signature_to_session(arr)
+                st.success("Signature saved!")
+                st.rerun()
+            else:
+                st.warning("Canvas is empty — draw your signature first.")
+except ImportError:
+    st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Tester Info (collapsed — auto-populates from session defaults)
+# ---------------------------------------------------------------------------
 with st.expander("🧰 Tester Info / Defaults", expanded=False):
     st.caption("Fill once — carries forward on Next Report and New Job.")
     t1, t2, t3 = st.columns(3)
@@ -393,43 +442,6 @@ with st.expander("🧰 Tester Info / Defaults", expanded=False):
     f["technician"] = t1b.text_input("Technician", f.get("technician", ""))
     f["cert_no"]    = t2b.text_input("Certification No.", f.get("cert_no", ""))
     f["recert"]     = t3b.text_input("Re-Cert Due Date",  f.get("recert", ""))
-
-    st.markdown("---")
-    st.markdown("**Saved Signature** — stamps every PDF automatically")
-    sig_exists = os.path.exists(SIG_FILE)
-    if sig_exists:
-        st.success("Signature on file.")
-        with open(SIG_FILE, "rb") as sf:
-            st.image(sf.read(), width=200)
-        if st.button("🗑️ Clear Saved Signature"):
-            os.remove(SIG_FILE)
-            st.rerun()
-    else:
-        st.info("Draw your signature below then tap Save Signature.")
-
-    try:
-        from streamlit_drawable_canvas import st_canvas
-        sig_canvas = st_canvas(
-            fill_color="rgba(0,0,0,0)",
-            stroke_width=2,
-            stroke_color="#cc0000",
-            background_color="#ffffff",
-            height=80,
-            width=300,
-            drawing_mode="freedraw",
-            key="sig_canvas",
-        )
-        if st.button("💾 Save Signature"):
-            if sig_canvas.image_data is not None:
-                arr = sig_canvas.image_data
-                if arr.max() > 0:
-                    save_signature(arr)
-                    st.success("Signature saved!")
-                    st.rerun()
-                else:
-                    st.warning("Canvas is empty — draw your signature first.")
-    except ImportError:
-        st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
 
 st.divider()
 
