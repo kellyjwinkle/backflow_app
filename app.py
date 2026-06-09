@@ -128,7 +128,6 @@ JAX_TEXT_FIELDS = {
     "signature_date":          (433, 84, 9),
 }
 
-# Signature moved down slightly (Y was 82, now 68) so it doesn't cover text above
 JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 161, 68, 160, 22
 
 JAX_CHECKBOXES = {
@@ -152,9 +151,7 @@ JAX_CHECKBOXES = {
     "RES_RECLAIM_YES":       (434, 466),
     "RES_RECLAIM_NO":        (472, 464),
     "INIT_CV1_CLOSED":       (139, 363),
-    # INIT_CV1_LEAKED removed
     "INIT_CV2_CLOSED":       (235, 362),
-    # INIT_CV2_LEAKED removed
     "INIT_RV_OPENED":        (331, 356),
     "INIT_RV_DIDNOT":        (336, 329),
     "INIT_PVB_AIOPEN":       (445, 359),
@@ -167,8 +164,6 @@ JAX_CHECKBOXES = {
     "JAX_FAILED":            (358, 108),
 }
 
-# Fields that persist across Next Report (same job) — includes property, contact,
-# test purpose/service dropdowns, tester info, and device info
 JAX_NEXT_REPORT_KEEP = {
     "premises_name", "owner_name", "service_address", "mailing_address",
     "physical_location", "contact_phone", "jea_account", "meter_number",
@@ -256,12 +251,12 @@ def get_signature_image_reader():
 
 
 # ---------------------------------------------------------------------------
-# Job folder (in-memory list of generated PDFs for ZIP download)
+# Job folder
 # ---------------------------------------------------------------------------
 
 def _init_job_folder():
     if "job_folder" not in st.session_state:
-        st.session_state.job_folder = []   # list of {"name": str, "bytes": bytes}
+        st.session_state.job_folder = []
 
 
 def add_to_job_folder(pdf_bytes: bytes, filename: str):
@@ -282,7 +277,6 @@ def build_zip() -> bytes:
 
 
 def render_job_folder_sidebar():
-    """Render the job folder panel in the sidebar."""
     _init_job_folder()
     folder = st.session_state.job_folder
     st.sidebar.markdown("---")
@@ -459,22 +453,18 @@ def generate_jax_pdf(form):
     if res_rcl == "Yes":  draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_YES"])
     elif res_rcl == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
 
-    # CV1 Initial — Closed Tight only (Leaked removed)
     icv1 = form.get("init_cv1_result", "")
     if icv1 == "Closed Tight":
         draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
 
-    # CV2 Initial — Closed Tight only (Leaked removed)
     icv2 = form.get("init_cv2_result", "")
     if icv2 == "Closed Tight":
         draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
 
-    # DP RV Initial: Opened At checkbox + psi text field
     irv = form.get("init_rv_result", "")
     if irv == "Opened At":      draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
 
-    # Air Inlet Opened At checkbox + psi text field
     ipvb = form.get("init_pvb_result", "")
     if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
     elif ipvb == "Did not open":      draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
@@ -505,7 +495,7 @@ def generate_jax_pdf(form):
 
 
 # ---------------------------------------------------------------------------
-# Delivery  — iOS-safe: single native Streamlit download_button only
+# Delivery
 # ---------------------------------------------------------------------------
 
 def safe_filename(customer, street, location, prefix=""):
@@ -518,7 +508,6 @@ def safe_filename(customer, street, location, prefix=""):
 
 
 def deliver_pdf(pdf_bytes: bytes, filename: str):
-    """iOS/iPad-safe PDF delivery via native Streamlit download_button."""
     st.download_button(
         label="📥 Download PDF",
         data=pdf_bytes,
@@ -543,17 +532,16 @@ def save_tester_defaults(form):
 
 
 # ---------------------------------------------------------------------------
-# Auto-save helper: bind a widget's value back to the form dict immediately
-# on_change so the user never has to press Enter
+# Auto-save helper
 # ---------------------------------------------------------------------------
 
 def _sync(form, key, widget_key):
-    """Called on_change — copies the widget value into form[key]."""
     form[key] = st.session_state.get(widget_key, "")
 
 
 def text_input_autosave(label, form, key, widget_key, **kwargs):
-    """text_input that auto-saves to form[key] on every change."""
+    """text_input that auto-saves to form[key] on every change.
+    NOTE: does NOT accept a 'container' kwarg — callers must use 'with col:'."""
     return st.text_input(
         label,
         value=form.get(key, ""),
@@ -587,7 +575,6 @@ st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧
 _load_sig_from_disk()
 _init_job_folder()
 
-# Sidebar: job folder always visible
 render_job_folder_sidebar()
 
 st.title("🔧 United Fire — Backflow Preventer Test Report")
@@ -649,9 +636,12 @@ if form_choice == "United Fire (Standard)":
     st.divider()
     st.subheader("📋 Job Information")
     r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
-    text_input_autosave("Date",   f, "date",   "u_date",   container=r1c1)
-    text_input_autosave("Branch", f, "branch", "u_branch", container=r1c2)
-    text_input_autosave("Authority Having Jurisdiction", f, "ahj", "u_ahj", container=r1c3)
+    with r1c1:
+        text_input_autosave("Date",   f, "date",   "u_date")
+    with r1c2:
+        text_input_autosave("Branch", f, "branch", "u_branch")
+    with r1c3:
+        text_input_autosave("Authority Having Jurisdiction", f, "ahj", "u_ahj")
     text_input_autosave("Customer / Site Name",  f, "customer_name",  "u_cust")
     text_input_autosave("Street Address",         f, "street_address", "u_addr")
     text_input_autosave("Location of Assembly",   f, "location",       "u_loc")
@@ -659,10 +649,14 @@ if form_choice == "United Fire (Standard)":
     st.divider()
     st.subheader("🔩 Backflow Assembly")
     c1, c2, c3, c4 = st.columns(4)
-    text_input_autosave("Serial Number",  f, "serial_number", "u_sn",  container=c1)
-    text_input_autosave("Manufacturer ↺", f, "manufacturer",  "u_mfg", container=c2)
-    text_input_autosave("Model ↺",         f, "model",         "u_mdl", container=c3)
-    text_input_autosave("Size ↺",           f, "size",          "u_sz",  container=c4)
+    with c1:
+        text_input_autosave("Serial Number",  f, "serial_number", "u_sn")
+    with c2:
+        text_input_autosave("Manufacturer ↺", f, "manufacturer",  "u_mfg")
+    with c3:
+        text_input_autosave("Model ↺",         f, "model",         "u_mdl")
+    with c4:
+        text_input_autosave("Size ↺",           f, "size",          "u_sz")
 
     c1, c2, c3 = st.columns(3)
     asm_opts = ["", "RP", "DC", "PVB", "SVB"]
@@ -762,13 +756,19 @@ if form_choice == "United Fire (Standard)":
     with st.expander("🧰 Tester Info / Defaults", expanded=False):
         st.caption("Fill once — carries forward on Next Report and New Job.")
         t1, t2, t3 = st.columns(3)
-        text_input_autosave("Gauge Manufacturer", f, "gauge_mfg",    "u_gmfg",   container=t1)
-        text_input_autosave("Gauge Serial #",     f, "gauge_serial", "u_gsn",    container=t2)
-        text_input_autosave("Date Calibrated",    f, "date_cal",     "u_cal",    container=t3)
+        with t1:
+            text_input_autosave("Gauge Manufacturer", f, "gauge_mfg",    "u_gmfg")
+        with t2:
+            text_input_autosave("Gauge Serial #",     f, "gauge_serial", "u_gsn")
+        with t3:
+            text_input_autosave("Date Calibrated",    f, "date_cal",     "u_cal")
         t1b, t2b, t3b = st.columns(3)
-        text_input_autosave("Technician",        f, "technician", "u_tech",   container=t1b)
-        text_input_autosave("Certification No.", f, "cert_no",    "u_cert",   container=t2b)
-        text_input_autosave("Re-Cert Due Date",  f, "recert",     "u_recert", container=t3b)
+        with t1b:
+            text_input_autosave("Technician",        f, "technician", "u_tech")
+        with t2b:
+            text_input_autosave("Certification No.", f, "cert_no",    "u_cert")
+        with t3b:
+            text_input_autosave("Re-Cert Due Date",  f, "recert",     "u_recert")
 
     st.divider()
 
@@ -823,21 +823,27 @@ else:
 
     st.divider()
 
-    # Property & Contact — sticky on Next Report (same job)
     st.subheader("📋 Property & Contact Information")
     c1, c2 = st.columns(2)
-    text_input_autosave("Name of premises (company / person)", f, "premises_name",    "j_prem",  container=c1)
-    text_input_autosave("Owner or agent's name",               f, "owner_name",       "j_own",   container=c2)
-    text_input_autosave("Service address",                      f, "service_address",  "j_sa",    container=c1)
-    text_input_autosave("Mailing address",                      f, "mailing_address",  "j_ma",    container=c2)
-    text_input_autosave("Physical location of device",          f, "physical_location","j_pl",    container=c1)
-    text_input_autosave("Contact phone number",                 f, "contact_phone",    "j_ph",    container=c2)
-    text_input_autosave("JEA account number",                   f, "jea_account",      "j_acct",  container=c1)
-    text_input_autosave("Meter number",                         f, "meter_number",     "j_meter", container=c2)
+    with c1:
+        text_input_autosave("Name of premises (company / person)", f, "premises_name",    "j_prem")
+    with c2:
+        text_input_autosave("Owner or agent's name",               f, "owner_name",       "j_own")
+    with c1:
+        text_input_autosave("Service address",                      f, "service_address",  "j_sa")
+    with c2:
+        text_input_autosave("Mailing address",                      f, "mailing_address",  "j_ma")
+    with c1:
+        text_input_autosave("Physical location of device",          f, "physical_location","j_pl")
+    with c2:
+        text_input_autosave("Contact phone number",                 f, "contact_phone",    "j_ph")
+    with c1:
+        text_input_autosave("JEA account number",                   f, "jea_account",      "j_acct")
+    with c2:
+        text_input_autosave("Meter number",                         f, "meter_number",     "j_meter")
 
     st.divider()
 
-    # Test Purpose & Service — sticky on Next Report (same job)
     st.subheader("📝 Test Purpose & Service Type")
     tp_opts_comm = ["", "Annual", "Repair", "Replacement", "New Installation"]
     st_opts_comm = ["", "Fire", "Irrigation", "Process/Isolation", "Potable", "Fire bypass"]
@@ -865,12 +871,18 @@ else:
 
     st.subheader("🔩 Device Information")
     d1, d2, d3, d4, d5, d6 = st.columns(6)
-    text_input_autosave("Device type",       f, "device_type",   "j_dt",  container=d1)
-    text_input_autosave("Manufacturer",      f, "manufacturer",  "j_mfg", container=d2)
-    text_input_autosave("Size",              f, "size",          "j_sz",  container=d3)
-    text_input_autosave("Model Number",      f, "model_number",  "j_mn",  container=d4)
-    text_input_autosave("Serial Number",     f, "serial_number", "j_sn",  container=d5)
-    text_input_autosave("Installation Date", f, "install_date",  "j_id",  container=d6)
+    with d1:
+        text_input_autosave("Device type",       f, "device_type",   "j_dt")
+    with d2:
+        text_input_autosave("Manufacturer",      f, "manufacturer",  "j_mfg")
+    with d3:
+        text_input_autosave("Size",              f, "size",          "j_sz")
+    with d4:
+        text_input_autosave("Model Number",      f, "model_number",  "j_mn")
+    with d5:
+        text_input_autosave("Serial Number",     f, "serial_number", "j_sn")
+    with d6:
+        text_input_autosave("Installation Date", f, "install_date",  "j_id")
 
     st.divider()
 
@@ -901,7 +913,6 @@ else:
 
     st.divider()
 
-    # Final Test — hidden in expander since Wes only fills Initial
     with st.expander("✅ Final Test (hidden by default)", expanded=False):
         ft1, ft2, ft3, ft4 = st.columns(4)
 
@@ -938,31 +949,41 @@ else:
 
     st.divider()
 
-    # Tester Information — sticky across all jobs (hidden in expander)
     with st.expander("🖊️ Tester Information", expanded=False):
         st.caption("Fill once — carries forward on every report and new job.")
         ti1, ti2, ti3, ti4 = st.columns(4)
-        text_input_autosave("Initial tester name ↺", f, "init_tester_name", "j_itn", container=ti1)
-        text_input_autosave("Company ↺",              f, "init_company",     "j_ico", container=ti2)
-        text_input_autosave("Cert # ↺",               f, "init_cert",        "j_ic",  container=ti3)
-        text_input_autosave("Test date",              f, "init_test_date",   "j_itd2",container=ti4)
+        with ti1:
+            text_input_autosave("Initial tester name ↺", f, "init_tester_name", "j_itn")
+        with ti2:
+            text_input_autosave("Company ↺",              f, "init_company",     "j_ico")
+        with ti3:
+            text_input_autosave("Cert # ↺",               f, "init_cert",        "j_ic")
+        with ti4:
+            text_input_autosave("Test date",              f, "init_test_date",   "j_itd2")
 
         ri1, ri2, ri3, ri4 = st.columns(4)
-        text_input_autosave("Repaired by",     f, "repaired_by",    "j_rb",  container=ri1)
-        text_input_autosave("Repair company",  f, "repair_company", "j_rco", container=ri2)
-        text_input_autosave("Repair cert #",   f, "repair_cert",    "j_rc",  container=ri3)
-        text_input_autosave("Repair date",     f, "repair_date",    "j_rd",  container=ri4)
+        with ri1:
+            text_input_autosave("Repaired by",     f, "repaired_by",    "j_rb")
+        with ri2:
+            text_input_autosave("Repair company",  f, "repair_company", "j_rco")
+        with ri3:
+            text_input_autosave("Repair cert #",   f, "repair_cert",    "j_rc")
+        with ri4:
+            text_input_autosave("Repair date",     f, "repair_date",    "j_rd")
 
         fi1, fi2, fi3, fi4 = st.columns(4)
-        text_input_autosave("Final tester name ↺", f, "final_tester_name", "j_ftn", container=fi1)
-        text_input_autosave("Company ↺",             f, "final_company",     "j_fco", container=fi2)
-        text_input_autosave("Cert # ↺",              f, "final_cert",        "j_fc",  container=fi3)
-        text_input_autosave("Test date",             f, "final_test_date",   "j_ftd2",container=fi4)
+        with fi1:
+            text_input_autosave("Final tester name ↺", f, "final_tester_name", "j_ftn")
+        with fi2:
+            text_input_autosave("Company ↺",             f, "final_company",     "j_fco")
+        with fi3:
+            text_input_autosave("Cert # ↺",              f, "final_cert",        "j_fc")
+        with fi4:
+            text_input_autosave("Test date",             f, "final_test_date",   "j_ftd2")
         text_input_autosave("Signature date",        f, "signature_date",    "j_sd")
 
     st.divider()
 
-    # Signature — hidden in expander since it's saved to disk
     with st.expander("✍️ Signature", expanded=False):
         if st.session_state.get("signature_b64"):
             st.success("Signature on file ✓")
