@@ -1,0 +1,29 @@
+{
+  "Wes Winkle": {
+    "technician": "Wes Winkle",
+    "cert_no": "",
+    "recert": "",
+    "gauge_mfg": "",
+    "gauge_serial": "",
+    "date_cal": "",
+    "signature_b64": ""
+  },
+  "Technician 2": {
+    "technician": "Technician 2",
+    "cert_no": "",
+    "recert": "",
+    "gauge_mfg": "",
+    "gauge_serial": "",
+    "date_cal": "",
+    "signature_b64": ""
+  },
+  "Technician 3": {
+    "technician": "Technician 3",
+    "cert_no": "",
+    "recert": "",
+    "gauge_mfg": "",
+    "gauge_serial": "",
+    "date_cal": "",
+    "signature_b64": ""
+  }
+}

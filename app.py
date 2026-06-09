@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-import json, os, re, base64, tempfile, zipfile
+import json, os, re, base64, tempfile, zipfile, requests
 from datetime import date
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ContentStream
@@ -15,8 +15,12 @@ import numpy as np
 # ---------------------------------------------------------------------------
 TEMPLATE_UNITED   = "backflow_template.pdf"
 TEMPLATE_JAX      = "jacksonville_template.pdf"
-SIG_FILE          = "signature_b64.txt"
+TECHNICIANS_FILE  = "technicians.json"
+SIG_FILE          = "signature_b64.txt"   # legacy — no longer used for persistence
 PAGE_W, PAGE_H     = 612, 792   # United Fire (US Letter)
+
+GITHUB_REPO       = "kellyjwinkle/backflow_app"
+GITHUB_API_BASE   = "https://api.github.com"
 
 def _get_pdf_page_size(path):
     try:
@@ -31,6 +35,105 @@ if os.path.exists(TEMPLATE_JAX):
     JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
 else:
     JAX_PAGE_W, JAX_PAGE_H = 612, 792
+
+# ---------------------------------------------------------------------------
+# Technician profile helpers (GitHub-backed)
+# ---------------------------------------------------------------------------
+
+def _github_token():
+    """Read GitHub token from Streamlit secrets, or None if not configured."""
+    try:
+        return st.secrets["GITHUB_TOKEN"]
+    except Exception:
+        return None
+
+
+def _github_headers():
+    token = _github_token()
+    h = {"Accept": "application/vnd.github+json"}
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
+
+
+def load_technicians_from_github():
+    """Fetch technicians.json directly from GitHub API (always fresh)."""
+    url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{TECHNICIANS_FILE}"
+    try:
+        r = requests.get(url, headers=_github_headers(), timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            return json.loads(content), data["sha"]
+    except Exception:
+        pass
+    # Fallback: read local file if GitHub unreachable
+    if os.path.exists(TECHNICIANS_FILE):
+        with open(TECHNICIANS_FILE, "r") as fh:
+            return json.load(fh), None
+    return {}, None
+
+
+def save_technicians_to_github(techs: dict, current_sha: str | None):
+    """Commit updated technicians.json back to the GitHub repo."""
+    token = _github_token()
+    if not token:
+        # No token — save locally only (won't survive reboot but better than nothing)
+        with open(TECHNICIANS_FILE, "w") as fh:
+            json.dump(techs, fh, indent=2)
+        return False, "No GITHUB_TOKEN secret configured — saved locally only."
+
+    url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{TECHNICIANS_FILE}"
+    content_b64 = base64.b64encode(json.dumps(techs, indent=2).encode()).decode()
+    payload = {
+        "message": "Update technician profiles via app",
+        "content": content_b64,
+    }
+    if current_sha:
+        payload["sha"] = current_sha
+
+    try:
+        r = requests.put(url, headers=_github_headers(), json=payload, timeout=10)
+        if r.status_code in (200, 201):
+            return True, "Profile saved to GitHub ✓"
+        else:
+            return False, f"GitHub API error {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return False, f"Network error: {e}"
+
+
+def _init_technicians():
+    """Load technicians into session state once per session."""
+    if "technicians" not in st.session_state:
+        techs, sha = load_technicians_from_github()
+        st.session_state["technicians"] = techs
+        st.session_state["technicians_sha"] = sha
+
+
+def get_technician_names():
+    _init_technicians()
+    return [""] + list(st.session_state["technicians"].keys())
+
+
+def get_technician_profile(name: str) -> dict:
+    _init_technicians()
+    return dict(st.session_state["technicians"].get(name, {}))
+
+
+def upsert_technician_profile(name: str, profile: dict):
+    """Save/update a tech profile in session state AND commit to GitHub."""
+    _init_technicians()
+    st.session_state["technicians"][name] = profile
+    ok, msg = save_technicians_to_github(
+        st.session_state["technicians"],
+        st.session_state.get("technicians_sha")
+    )
+    # Refresh SHA after successful save
+    if ok:
+        _, new_sha = load_technicians_from_github()
+        st.session_state["technicians_sha"] = new_sha
+    return ok, msg
+
 
 # ---------------------------------------------------------------------------
 # United Fire form config
@@ -215,39 +318,31 @@ def wrap_text(text, w=58):
 # Signature helpers
 # ---------------------------------------------------------------------------
 
-def _load_sig_from_disk():
-    if "sig_loaded" not in st.session_state:
-        st.session_state["sig_loaded"] = True
-        if os.path.exists(SIG_FILE):
-            with open(SIG_FILE, "r") as fh:
-                data = fh.read().strip()
-            if data:
-                st.session_state["signature_b64"] = data
+def get_signature_image_reader():
+    """Return ImageReader from session-state signature_b64, or None."""
+    b64 = st.session_state.get("signature_b64")
+    if b64:
+        try:
+            buf = BytesIO(base64.b64decode(b64))
+            buf.seek(0)
+            return ImageReader(buf)
+        except Exception:
+            return None
+    return None
+
+
+def clear_signature():
+    st.session_state.pop("signature_b64", None)
 
 
 def save_signature(img_array):
+    """Save drawn signature into session state (and current tech profile)."""
     buf = BytesIO()
     img = Image.fromarray(img_array.astype("uint8"), "RGBA")
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
     st.session_state["signature_b64"] = b64
-    with open(SIG_FILE, "w") as fh:
-        fh.write(b64)
-
-
-def clear_signature():
-    st.session_state.pop("signature_b64", None)
-    if os.path.exists(SIG_FILE):
-        os.remove(SIG_FILE)
-
-
-def get_signature_image_reader():
-    b64 = st.session_state.get("signature_b64")
-    if b64:
-        buf = BytesIO(base64.b64decode(b64))
-        buf.seek(0)
-        return ImageReader(buf)
-    return None
+    return b64
 
 
 # ---------------------------------------------------------------------------
@@ -519,19 +614,6 @@ def deliver_pdf(pdf_bytes: bytes, filename: str):
 
 
 # ---------------------------------------------------------------------------
-# Tester defaults
-# ---------------------------------------------------------------------------
-
-TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
-
-def get_tester_defaults():
-    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
-
-def save_tester_defaults(form):
-    st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
-
-
-# ---------------------------------------------------------------------------
 # Auto-save helper
 # ---------------------------------------------------------------------------
 
@@ -540,8 +622,7 @@ def _sync(form, key, widget_key):
 
 
 def text_input_autosave(label, form, key, widget_key, **kwargs):
-    """text_input that auto-saves to form[key] on every change.
-    NOTE: does NOT accept a 'container' kwarg — callers must use 'with col:'."""
+    """text_input that auto-saves to form[key] on every change."""
     return st.text_input(
         label,
         value=form.get(key, ""),
@@ -568,16 +649,167 @@ def _radio(label, options, key, form, **kwargs):
 
 
 # ===========================================================================
+# Technician selector sidebar widget
+# ===========================================================================
+
+def render_technician_sidebar():
+    """Sidebar: technician selector + profile editor."""
+    _init_technicians()
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("👷 Technician")
+
+    names = get_technician_names()
+    current = st.session_state.get("active_technician", "")
+    idx = names.index(current) if current in names else 0
+
+    selected = st.sidebar.selectbox(
+        "Select technician",
+        names,
+        index=idx,
+        format_func=lambda x: "— select —" if x == "" else x,
+        key="tech_selector",
+    )
+
+    if selected and selected != st.session_state.get("active_technician", ""):
+        # Load this tech's profile into session
+        profile = get_technician_profile(selected)
+        st.session_state["active_technician"] = selected
+        st.session_state["signature_b64"] = profile.get("signature_b64", "")
+        # Inject tester defaults so both forms pick them up
+        st.session_state["tester_defaults"] = {
+            k: profile.get(k, "") for k in
+            ["technician", "cert_no", "recert", "gauge_mfg", "gauge_serial", "date_cal"]
+        }
+        st.rerun()
+
+    if not selected:
+        st.sidebar.caption("Select your name to load your profile.")
+        return
+
+    # ── Profile editor ──────────────────────────────────────────────────────
+    with st.sidebar.expander("✏️ Edit My Profile", expanded=False):
+        profile = get_technician_profile(selected)
+
+        new_name   = st.text_input("Display name",        value=profile.get("technician",  selected), key="pe_name")
+        new_cert   = st.text_input("Certification No.",   value=profile.get("cert_no",     ""),       key="pe_cert")
+        new_recert = st.text_input("Re-Cert Due Date",    value=profile.get("recert",      ""),       key="pe_recert")
+        new_gmfg   = st.text_input("Gauge Manufacturer",  value=profile.get("gauge_mfg",   ""),       key="pe_gmfg")
+        new_gsn    = st.text_input("Gauge Serial #",      value=profile.get("gauge_serial", ""),      key="pe_gsn")
+        new_gcal   = st.text_input("Date Calibrated",     value=profile.get("date_cal",    ""),       key="pe_gcal")
+
+        st.markdown("**Signature**")
+        if st.session_state.get("signature_b64"):
+            st.success("Signature on file ✓")
+            if st.button("🗑️ Clear signature", key="pe_clrsig"):
+                clear_signature()
+                st.rerun()
+        else:
+            try:
+                from streamlit_drawable_canvas import st_canvas
+                sig_canvas = st_canvas(
+                    fill_color="rgba(255,255,255,0)",
+                    stroke_width=2,
+                    stroke_color="#cc0000",
+                    background_color="#ffffff",
+                    height=80, width=220,
+                    drawing_mode="freedraw",
+                    key="pe_sig_canvas",
+                )
+                if st.button("💾 Save signature", key="pe_savesig"):
+                    if sig_canvas.image_data is not None and sig_canvas.image_data.max() > 0:
+                        b64 = save_signature(sig_canvas.image_data)
+                        st.session_state["signature_b64"] = b64
+                    else:
+                        st.warning("Draw your signature first.")
+            except ImportError:
+                st.warning("`streamlit-drawable-canvas` not installed.")
+
+        if st.button("💾 Save Profile to Server", key="pe_save", use_container_width=True):
+            updated_profile = {
+                "technician":    new_name,
+                "cert_no":       new_cert,
+                "recert":        new_recert,
+                "gauge_mfg":     new_gmfg,
+                "gauge_serial":  new_gsn,
+                "date_cal":      new_gcal,
+                "signature_b64": st.session_state.get("signature_b64", ""),
+            }
+            # If name changed, update the key in the dict
+            techs = st.session_state["technicians"]
+            if new_name != selected and new_name.strip():
+                techs.pop(selected, None)
+                key_name = new_name
+            else:
+                key_name = selected
+            techs[key_name] = updated_profile
+            ok, msg = save_technicians_to_github(
+                techs, st.session_state.get("technicians_sha")
+            )
+            if ok:
+                st.success(msg)
+                st.session_state["active_technician"] = key_name
+                # Refresh SHA
+                _, new_sha = load_technicians_from_github()
+                st.session_state["technicians_sha"] = new_sha
+            else:
+                st.error(msg)
+
+    # ── Add new technician ───────────────────────────────────────────────────
+    with st.sidebar.expander("➕ Add New Technician", expanded=False):
+        new_tech_name = st.text_input("Full name", key="new_tech_name")
+        if st.button("Add", key="new_tech_add"):
+            name = new_tech_name.strip()
+            if name and name not in st.session_state["technicians"]:
+                blank = {
+                    "technician": name, "cert_no": "", "recert": "",
+                    "gauge_mfg": "", "gauge_serial": "", "date_cal": "",
+                    "signature_b64": "",
+                }
+                st.session_state["technicians"][name] = blank
+                ok, msg = save_technicians_to_github(
+                    st.session_state["technicians"],
+                    st.session_state.get("technicians_sha")
+                )
+                if ok:
+                    st.success(f"Added {name}")
+                    _, new_sha = load_technicians_from_github()
+                    st.session_state["technicians_sha"] = new_sha
+                    st.rerun()
+                else:
+                    st.error(msg)
+            elif name in st.session_state["technicians"]:
+                st.warning("That name already exists.")
+            else:
+                st.warning("Enter a name first.")
+
+
+# ===========================================================================
 # App layout
 # ===========================================================================
 
-st.set_page_config(page_title="United Fire — Backflow Report", page_icon="🔧", layout="wide")
-_load_sig_from_disk()
+st.set_page_config(page_title="Backflow Report", page_icon="🔧", layout="wide")
 _init_job_folder()
+_init_technicians()
 
+render_technician_sidebar()
 render_job_folder_sidebar()
 
-st.title("🔧 United Fire — Backflow Preventer Test Report")
+st.title("🔧 Backflow Preventer Test Report")
+
+# ---------------------------------------------------------------------------
+# Tester defaults helper (pulls from active tech profile)
+# ---------------------------------------------------------------------------
+TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
+
+def get_tester_defaults():
+    active = st.session_state.get("active_technician", "")
+    if active:
+        profile = get_technician_profile(active)
+        return {k: profile.get(k, "") for k in TESTER_KEYS}
+    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
+
+def save_tester_defaults(form):
+    st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
 
 # ---------------------------------------------------------------------------
 # Form selector
@@ -603,6 +835,14 @@ if form_choice == "United Fire (Standard)":
         st.session_state.united_form = f0
 
     f = st.session_state.united_form
+
+    # Inject active tech profile if just selected
+    active = st.session_state.get("active_technician", "")
+    if active:
+        profile = get_technician_profile(active)
+        for k in TESTER_KEYS:
+            if not f.get(k) and profile.get(k):
+                f[k] = profile[k]
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -724,37 +964,8 @@ if form_choice == "United Fire (Standard)":
 
     st.divider()
 
-    with st.expander("✍️ Signature", expanded=False):
-        if st.session_state.get("signature_b64"):
-            st.success("Signature on file ✓")
-            if st.button("🗑️ Clear Signature", key="u_clrsig"):
-                clear_signature()
-                st.rerun()
-        else:
-            try:
-                from streamlit_drawable_canvas import st_canvas
-                sig_canvas = st_canvas(
-                    fill_color="rgba(255,255,255,0)",
-                    stroke_width=2,
-                    stroke_color="#cc0000",
-                    background_color="#ffffff",
-                    height=80, width=300, drawing_mode="freedraw", key="sig_canvas")
-                if st.button("💾 Save Signature", key="u_savesig"):
-                    if sig_canvas.image_data is not None:
-                        arr = sig_canvas.image_data
-                        if arr.max() > 0:
-                            save_signature(arr)
-                            st.success("Signature saved!")
-                            st.rerun()
-                        else:
-                            st.warning("Canvas is empty — draw your signature first.")
-            except ImportError:
-                st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
-
-    st.divider()
-
-    with st.expander("🧰 Tester Info / Defaults", expanded=False):
-        st.caption("Fill once — carries forward on Next Report and New Job.")
+    with st.expander("🧰 Tester Info", expanded=False):
+        st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
         t1, t2, t3 = st.columns(3)
         with t1:
             text_input_autosave("Gauge Manufacturer", f, "gauge_mfg",    "u_gmfg")
@@ -796,6 +1007,20 @@ else:
         }
 
     f = st.session_state.jax_form
+
+    # Inject active tech profile if just selected
+    active = st.session_state.get("active_technician", "")
+    if active:
+        profile = get_technician_profile(active)
+        jax_tech_map = {
+            "init_tester_name": "technician",
+            "init_cert":        "cert_no",
+            "final_tester_name": "technician",
+            "final_cert":        "cert_no",
+        }
+        for form_key, profile_key in jax_tech_map.items():
+            if not f.get(form_key) and profile.get(profile_key):
+                f[form_key] = profile[profile_key]
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -950,7 +1175,7 @@ else:
     st.divider()
 
     with st.expander("🖊️ Tester Information", expanded=False):
-        st.caption("Fill once — carries forward on every report and new job.")
+        st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
         ti1, ti2, ti3, ti4 = st.columns(4)
         with ti1:
             text_input_autosave("Initial tester name ↺", f, "init_tester_name", "j_itn")
@@ -981,35 +1206,6 @@ else:
         with fi4:
             text_input_autosave("Test date",             f, "final_test_date",   "j_ftd2")
         text_input_autosave("Signature date",        f, "signature_date",    "j_sd")
-
-    st.divider()
-
-    with st.expander("✍️ Signature", expanded=False):
-        if st.session_state.get("signature_b64"):
-            st.success("Signature on file ✓")
-            if st.button("🗑️ Clear Signature", key="j_clrsig"):
-                clear_signature()
-                st.rerun()
-        else:
-            try:
-                from streamlit_drawable_canvas import st_canvas
-                sig_canvas = st_canvas(
-                    fill_color="rgba(255,255,255,0)",
-                    stroke_width=2,
-                    stroke_color="#cc0000",
-                    background_color="#ffffff",
-                    height=80, width=300, drawing_mode="freedraw", key="j_sig_canvas")
-                if st.button("💾 Save Signature", key="j_savesig"):
-                    if sig_canvas.image_data is not None:
-                        arr = sig_canvas.image_data
-                        if arr.max() > 0:
-                            save_signature(arr)
-                            st.success("Signature saved!")
-                            st.rerun()
-                        else:
-                            st.warning("Canvas is empty — draw your signature first.")
-            except ImportError:
-                st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
 
     st.divider()
 
