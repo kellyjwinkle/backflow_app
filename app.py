@@ -161,9 +161,11 @@ JAX_CHECKBOXES = {
     # DP RV Initial: checkbox for "Opened At" / "Did Not Open"
     "INIT_RV_OPENED":        (331, 356),
     "INIT_RV_DIDNOT":        (336, 329),
+    "INIT_RV_PSI":           (0, 0),    # placeholder — position via calibrator
     # Air Inlet: checkbox for "Air inlet opened at" / "Did not open"
     "INIT_PVB_AIOPEN":       (445, 359),
     "INIT_PVB_AIDNOT":       (451, 323),
+    "INIT_PVB_PSI":          (0, 0),    # placeholder — position via calibrator
     # Final test — CV1 and CV2 Closed Tight only (Leaked removed per request)
     "FINAL_CV1_CLOSED":      (138, 306),
     "FINAL_CV2_CLOSED":      (236, 301),
