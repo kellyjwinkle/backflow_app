@@ -15,7 +15,8 @@ import numpy as np
 TEMPLATE_UNITED   = "backflow_template.pdf"
 TEMPLATE_JAX      = "jacksonville_template.pdf"
 SIG_FILE          = "signature_b64.txt"
-PAGE_W, PAGE_H    = 612, 792
+PAGE_W, PAGE_H     = 612, 792   # United Fire (US Letter) — keep this
+JAX_PAGE_W, JAX_PAGE_H = 595, 842  # Jacksonville template (A4)
 
 # ---------------------------------------------------------------------------
 # "United Fire" form config (existing form)
