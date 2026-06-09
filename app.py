@@ -331,7 +331,7 @@ def generate_united_pdf(form):
 
 def generate_jax_pdf(form):
     overlay_buf = BytesIO()
-    c = canvas.Canvas(overlay_buf, pagesize=(PAGE_W, PAGE_H))
+    c = canvas.Canvas(overlay_buf, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
 
     for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
         put_text(c, form.get(field, ""), x, y, sz)
