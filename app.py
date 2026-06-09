@@ -158,10 +158,13 @@ JAX_CHECKBOXES = {
     "INIT_CV1_LEAKED":       (138, 325),
     "INIT_CV2_CLOSED":       (235, 362),
     "INIT_CV2_LEAKED":       (235, 325),
+    # DP RV Initial: checkbox for "Opened At" / "Did Not Open"
     "INIT_RV_OPENED":        (331, 356),
     "INIT_RV_DIDNOT":        (336, 329),
+    # Air Inlet: checkbox for "Air inlet opened at" / "Did not open"
     "INIT_PVB_AIOPEN":       (445, 359),
     "INIT_PVB_AIDNOT":       (451, 323),
+    # Final test — CV1 and CV2 Closed Tight only (Leaked removed per request)
     "FINAL_CV1_CLOSED":      (138, 306),
     "FINAL_CV2_CLOSED":      (236, 301),
     "FINAL_RV_OPENED":       (331, 296),
@@ -266,20 +269,16 @@ def _merge_overlay(template_path, overlay_buf):
 
     overlay_buf.seek(0)
 
-    # Read template and overlay
     template_reader = PdfReader(template_path)
     overlay_reader  = PdfReader(overlay_buf)
 
     writer = PdfWriter()
 
-    # Clone ALL pages from template first
     for page in template_reader.pages:
         writer.add_page(page)
 
-    # Merge overlay onto page 0
     writer.pages[0].merge_page(overlay_reader.pages[0])
 
-    # Strip interactive form fields so they don't conflict
     if "/AcroForm" in writer._root_object:
         del writer._root_object["/AcroForm"]
 
@@ -407,17 +406,17 @@ def generate_jax_pdf(form):
     if icv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
     elif icv2 == "Leaked":     draw_x(c, *JAX_CHECKBOXES["INIT_CV2_LEAKED"])
 
-    # Initial test — DP Relief Valve (checkbox + text)
+    # Initial test — DP Relief Valve: checkbox + text field (init_rv_psi)
     irv = form.get("init_rv_result", "")
     if irv == "Opened At":      draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
-    # PSI value written as text field via JAX_TEXT_FIELDS["init_rv_psi"]
+    # PSI value written via JAX_TEXT_FIELDS["init_rv_psi"]
 
-    # Initial test — Air Inlet / PVB (checkbox + text)
+    # Initial test — Air Inlet: checkbox + text field (init_pvb_psi)
     ipvb = form.get("init_pvb_result", "")
     if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
     elif ipvb == "Did not open":      draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
-    # PSI value written as text field via JAX_TEXT_FIELDS["init_pvb_psi"]
+    # PSI value written via JAX_TEXT_FIELDS["init_pvb_psi"]
 
     # Final test — CV1 (Closed Tight only; Leaked removed)
     fcv1 = form.get("final_cv1_result", "")
@@ -535,7 +534,6 @@ st.divider()
 # ---------------------------------------------------------------------------
 if form_choice == "United Fire (Standard)":
 
-    # ---- session init ----
     if "united_form" not in st.session_state:
         defs = get_tester_defaults()
         f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
@@ -651,7 +649,6 @@ if form_choice == "United Fire (Standard)":
 
     st.divider()
 
-    # Signature
     st.subheader("✍️ Technician Signature")
     sig_exists = bool(st.session_state.get("signature_b64"))
     if sig_exists:
@@ -744,7 +741,6 @@ else:
 
     st.divider()
 
-    # ---- Premises / owner info ----
     st.subheader("📋 Property & Contact Information")
     c1, c2 = st.columns(2)
     f["premises_name"]    = c1.text_input("Name of premises (company / person)", f.get("premises_name",""),    key="j_prem")
@@ -758,7 +754,6 @@ else:
 
     st.divider()
 
-    # ---- Test purpose & service type ----
     st.subheader("📝 Test Purpose & Service Type")
     tp_opts_comm = ["", "Annual", "Repair", "Replacement", "New Installation"]
     st_opts_comm = ["", "Fire", "Irrigation", "Process/Isolation", "Potable", "Fire bypass"]
@@ -784,7 +779,6 @@ else:
 
     st.divider()
 
-    # ---- Device info ----
     st.subheader("🔩 Device Information")
     d1, d2, d3, d4, d5, d6 = st.columns(6)
     f["device_type"]    = d1.text_input("Device type",        f.get("device_type",""),    key="j_dt")
@@ -796,7 +790,6 @@ else:
 
     st.divider()
 
-    # ---- Initial test ----
     st.subheader("🧪 Initial Test")
     it1, it2, it3, it4 = st.columns(4)
 
@@ -824,7 +817,6 @@ else:
 
     st.divider()
 
-    # ---- Final test ----
     st.subheader("✅ Final Test")
     ft1, ft2, ft3, ft4 = st.columns(4)
 
@@ -856,14 +848,12 @@ else:
 
     st.divider()
 
-    # ---- Repairs ----
     st.subheader("🔧 Repairs / Unusual Conditions")
     f["repairs"] = st.text_area("Repairs/unusual installation conditions/replacement details",
         f.get("repairs",""), height=80, key="j_rep")
 
     st.divider()
 
-    # ---- Tester rows ----
     st.subheader("👷 Tester Information")
     st.markdown("**Initial test performed by**")
     it1a, it2a, it3a, it4a = st.columns(4)
@@ -888,7 +878,6 @@ else:
 
     st.divider()
 
-    # Signature
     st.subheader("✍️ Signature")
     f["signature_date"] = st.text_input("Signature Date", f.get("signature_date", date.today().strftime("%m/%d/%Y")), key="j_sigdate")
 
