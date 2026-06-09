@@ -372,27 +372,31 @@ def generate_jax_pdf(form):
     if res_rcl == "Yes":  draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_YES"])
     elif res_rcl == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
 
-    # Initial test
+    # Initial test — CV1
     icv1 = form.get("init_cv1_result", "")
     if icv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
     elif icv1 == "Leaked":     draw_x(c, *JAX_CHECKBOXES["INIT_CV1_LEAKED"])
 
+    # Initial test — CV2
     icv2 = form.get("init_cv2_result", "")
     if icv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
     elif icv2 == "Leaked":     draw_x(c, *JAX_CHECKBOXES["INIT_CV2_LEAKED"])
 
+    # Initial test — DP Relief Valve (checkbox + text)
     irv = form.get("init_rv_result", "")
     if irv == "Opened At":      draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
 
+    # Initial test — Air Inlet / PVB (checkbox + text)
     ipvb = form.get("init_pvb_result", "")
     if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
     elif ipvb == "Did not open":      draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
 
-    # Final test
+    # Final test — CV1 (Closed Tight only; Leaked removed)
     fcv1 = form.get("final_cv1_result", "")
     if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
 
+    # Final test — CV2 (Closed Tight only; Leaked removed)
     fcv2 = form.get("final_cv2_result", "")
     if fcv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_CLOSED"])
 
