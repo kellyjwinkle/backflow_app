@@ -15,8 +15,26 @@ import numpy as np
 TEMPLATE_UNITED   = "backflow_template.pdf"
 TEMPLATE_JAX      = "jacksonville_template.pdf"
 SIG_FILE          = "signature_b64.txt"
-PAGE_W, PAGE_H     = 612, 792   # United Fire (US Letter) — keep this
-JAX_PAGE_W, JAX_PAGE_H = 595, 842  # Jacksonville template (A4)
+PAGE_W, PAGE_H     = 612, 792   # United Fire (US Letter)
+
+# JAX page size — read dynamically from the template at startup
+def _get_pdf_page_size(path):
+    """Return (width, height) in points from the first page of a PDF."""
+    try:
+        reader = PdfReader(path)
+        page = reader.pages[0]
+        mb = page.MediaBox
+        # MediaBox is [llx, lly, urx, ury]
+        w = float(mb[2]) - float(mb[0])
+        h = float(mb[3]) - float(mb[1])
+        return w, h
+    except Exception:
+        return 595, 842  # fall back to A4
+
+if os.path.exists(TEMPLATE_JAX):
+    JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
+else:
+    JAX_PAGE_W, JAX_PAGE_H = 595, 842
 
 # ---------------------------------------------------------------------------
 # "United Fire" form config (existing form)
@@ -331,6 +349,7 @@ def generate_united_pdf(form):
 
 def generate_jax_pdf(form):
     overlay_buf = BytesIO()
+    # Use the actual page dimensions read from the template file
     c = canvas.Canvas(overlay_buf, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
 
     for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
