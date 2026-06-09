@@ -128,7 +128,8 @@ JAX_TEXT_FIELDS = {
     "signature_date":          (433, 84, 9),
 }
 
-JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 161, 82, 160, 22
+# Signature moved down slightly (Y was 82, now 68) so it doesn't cover text above
+JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 161, 68, 160, 22
 
 JAX_CHECKBOXES = {
     "COMM_ANNUAL":           (214, 545),
@@ -166,9 +167,13 @@ JAX_CHECKBOXES = {
     "JAX_FAILED":            (358, 108),
 }
 
+# Fields that persist across Next Report (same job) — includes property, contact,
+# test purpose/service dropdowns, tester info, and device info
 JAX_NEXT_REPORT_KEEP = {
     "premises_name", "owner_name", "service_address", "mailing_address",
     "physical_location", "contact_phone", "jea_account", "meter_number",
+    "comm_test_purpose", "comm_service_type", "comm_reclaim",
+    "res_test_purpose", "res_service_type", "res_reclaim",
     "manufacturer", "model_number", "size", "device_type",
     "init_tester_name", "init_company", "init_cert",
     "final_tester_name", "final_company", "final_cert",
@@ -261,7 +266,6 @@ def _init_job_folder():
 
 def add_to_job_folder(pdf_bytes: bytes, filename: str):
     _init_job_folder()
-    # Avoid exact duplicates (same filename); overwrite if re-generated
     st.session_state.job_folder = [
         f for f in st.session_state.job_folder if f["name"] != filename
     ]
@@ -284,7 +288,6 @@ def render_job_folder_sidebar():
     st.sidebar.markdown("---")
     st.sidebar.subheader("📁 Job Folder")
 
-    # Job name input for ZIP filename — persists across reports
     if "job_folder_name" not in st.session_state:
         st.session_state.job_folder_name = ""
     st.session_state.job_folder_name = st.sidebar.text_input(
@@ -302,7 +305,6 @@ def render_job_folder_sidebar():
     for item in folder:
         st.sidebar.markdown(f"• {item['name']}")
 
-    # Build ZIP — use entered job name if available, else derive from first PDF name
     zip_bytes = build_zip()
     entered_name = st.session_state.job_folder_name.strip()
     if entered_name:
@@ -313,8 +315,6 @@ def render_job_folder_sidebar():
         zip_name = re.sub(r"[^\w\s\-]", "", zip_name).strip() or "Job"
     zip_filename = f"{zip_name} - Reports.zip"
 
-    # Use a dynamic key tied to folder length so iOS re-renders the button
-    # when new PDFs are added (avoids stale cached download)
     st.sidebar.download_button(
         label=f"📦 Download ZIP ({len(folder)} report{'s' if len(folder)!=1 else ''})",
         data=zip_bytes,
@@ -473,13 +473,11 @@ def generate_jax_pdf(form):
     irv = form.get("init_rv_result", "")
     if irv == "Opened At":      draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
-    # init_rv_psi is rendered via JAX_TEXT_FIELDS
 
     # Air Inlet Opened At checkbox + psi text field
     ipvb = form.get("init_pvb_result", "")
     if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
     elif ipvb == "Did not open":      draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
-    # init_pvb_psi is rendered via JAX_TEXT_FIELDS
 
     fcv1 = form.get("final_cv1_result", "")
     if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
@@ -544,12 +542,39 @@ def save_tester_defaults(form):
     st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
 
 
+# ---------------------------------------------------------------------------
+# Auto-save helper: bind a widget's value back to the form dict immediately
+# on_change so the user never has to press Enter
+# ---------------------------------------------------------------------------
+
+def _sync(form, key, widget_key):
+    """Called on_change — copies the widget value into form[key]."""
+    form[key] = st.session_state.get(widget_key, "")
+
+
+def text_input_autosave(label, form, key, widget_key, **kwargs):
+    """text_input that auto-saves to form[key] on every change."""
+    return st.text_input(
+        label,
+        value=form.get(key, ""),
+        key=widget_key,
+        on_change=_sync,
+        args=(form, key, widget_key),
+        **kwargs,
+    )
+
+
 def _radio(label, options, key, form, **kwargs):
     opts = [""] + list(options)
     current = form.get(key, "")
     idx = opts.index(current) if current in opts else 0
+
+    def _sync_radio():
+        form[key] = st.session_state.get(key, "")
+
     chosen = st.radio(label, opts, index=idx, key=key,
-                      format_func=lambda x: "—" if x == "" else x, **kwargs)
+                      format_func=lambda x: "—" if x == "" else x,
+                      on_change=_sync_radio, **kwargs)
     form[key] = chosen
     return chosen
 
@@ -624,20 +649,20 @@ if form_choice == "United Fire (Standard)":
     st.divider()
     st.subheader("📋 Job Information")
     r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
-    f["date"]   = r1c1.text_input("Date",   f.get("date",   date.today().strftime("%m/%d/%Y")), key="u_date")
-    f["branch"] = r1c2.text_input("Branch", f.get("branch", ""), key="u_branch")
-    f["ahj"]    = r1c3.text_input("Authority Having Jurisdiction", f.get("ahj", ""), key="u_ahj")
-    f["customer_name"]  = st.text_input("Customer / Site Name",  f.get("customer_name",  ""), key="u_cust")
-    f["street_address"] = st.text_input("Street Address",         f.get("street_address", ""), key="u_addr")
-    f["location"]       = st.text_input("Location of Assembly",   f.get("location",       ""), key="u_loc")
+    text_input_autosave("Date",   f, "date",   "u_date",   container=r1c1)
+    text_input_autosave("Branch", f, "branch", "u_branch", container=r1c2)
+    text_input_autosave("Authority Having Jurisdiction", f, "ahj", "u_ahj", container=r1c3)
+    text_input_autosave("Customer / Site Name",  f, "customer_name",  "u_cust")
+    text_input_autosave("Street Address",         f, "street_address", "u_addr")
+    text_input_autosave("Location of Assembly",   f, "location",       "u_loc")
 
     st.divider()
     st.subheader("🔩 Backflow Assembly")
     c1, c2, c3, c4 = st.columns(4)
-    f["serial_number"] = c1.text_input("Serial Number",  f.get("serial_number", ""), key="u_sn")
-    f["manufacturer"]  = c2.text_input("Manufacturer ↺", f.get("manufacturer",  ""), key="u_mfg")
-    f["model"]         = c3.text_input("Model ↺",         f.get("model",         ""), key="u_mdl")
-    f["size"]          = c4.text_input("Size ↺",           f.get("size",          ""), key="u_sz")
+    text_input_autosave("Serial Number",  f, "serial_number", "u_sn",  container=c1)
+    text_input_autosave("Manufacturer ↺", f, "manufacturer",  "u_mfg", container=c2)
+    text_input_autosave("Model ↺",         f, "model",         "u_mdl", container=c3)
+    text_input_autosave("Size ↺",           f, "size",          "u_sz",  container=c4)
 
     c1, c2, c3 = st.columns(3)
     asm_opts = ["", "RP", "DC", "PVB", "SVB"]
@@ -665,17 +690,17 @@ if form_choice == "United Fire (Standard)":
         with cv_c1:
             st.markdown("*CV #1*")
             _radio("CV #1 Result", ["Closed Tight","Leaked"], "cv1_result", f, horizontal=True)
-            f["cv1_dp"] = st.text_input("CV #1 Differential Pressure (psi)", f.get("cv1_dp",""), key="u_cv1dp")
+            text_input_autosave("CV #1 Differential Pressure (psi)", f, "cv1_dp", "u_cv1dp")
         with cv_c2:
             st.markdown("*CV #2*")
             _radio("CV #2 Result", ["Closed Tight","Leaked"], "cv2_result", f, horizontal=True)
-            f["cv2_dp"] = st.text_input("CV #2 Differential Pressure (psi)", f.get("cv2_dp",""), key="u_cv2dp")
+            text_input_autosave("CV #2 Differential Pressure (psi)", f, "cv2_dp", "u_cv2dp")
 
         st.markdown("**Relief Valve**")
         rv_c1, rv_c2, rv_c3 = st.columns(3)
         with rv_c1:
             _radio("RV Result", ["Opened At","Did Not Open"], "rv_result", f, horizontal=True)
-            f["rv_psi"] = st.text_input("RV Opened At (psi)", f.get("rv_psi",""), key="u_rvpsi")
+            text_input_autosave("RV Opened At (psi)", f, "rv_psi", "u_rvpsi")
         with rv_c2:
             _radio("RV Outlet", ["Closed","Leaked"], "rv_out_result", f, horizontal=True)
         with rv_c3:
@@ -686,13 +711,13 @@ if form_choice == "United Fire (Standard)":
         pvb_c1, pvb_c2 = st.columns(2)
         with pvb_c1:
             _radio("Air Inlet", ["Closed Tight","Opened At"], "pvb_ai_result", f, horizontal=True)
-            f["pvb_ai_psi"] = st.text_input("Air Inlet Opened At (psi)", f.get("pvb_ai_psi",""), key="u_aipsi")
+            text_input_autosave("Air Inlet Opened At (psi)", f, "pvb_ai_psi", "u_aipsi")
         with pvb_c2:
             _radio("Check Valve", ["Leaked","Held At"], "pvb_cv_result", f, horizontal=True)
-            f["pvb_cv_psi"] = st.text_input("CV Held/Leaked At (psi)", f.get("pvb_cv_psi",""), key="u_cvpsi")
+            text_input_autosave("CV Held/Leaked At (psi)", f, "pvb_cv_psi", "u_cvpsi")
 
     st.divider()
-    f["test_date"] = st.text_input("Test Date", f.get("test_date", date.today().strftime("%m/%d/%Y")), key="u_tdate")
+    text_input_autosave("Test Date", f, "test_date", "u_tdate")
 
     res_opts = ["", "PASSED", "FAILED"]
     f["assembly_result"] = st.radio("Pass / Fail", res_opts,
@@ -704,45 +729,46 @@ if form_choice == "United Fire (Standard)":
     f["repair_desc"] = st.text_area("Repair description", f.get("repair_desc",""), height=80, key="u_rep")
 
     st.divider()
-    st.subheader("✍️ Signature")
-    if st.session_state.get("signature_b64"):
-        st.success("Signature on file ✓")
-        if st.button("🗑️ Clear Signature", key="u_clrsig"):
-            clear_signature()
-            st.rerun()
-    else:
-        try:
-            from streamlit_drawable_canvas import st_canvas
-            sig_canvas = st_canvas(
-                fill_color="rgba(255,255,255,0)",
-                stroke_width=2,
-                stroke_color="#cc0000",
-                background_color="#ffffff",
-                height=80, width=300, drawing_mode="freedraw", key="sig_canvas")
-            if st.button("💾 Save Signature", key="u_savesig"):
-                if sig_canvas.image_data is not None:
-                    arr = sig_canvas.image_data
-                    if arr.max() > 0:
-                        save_signature(arr)
-                        st.success("Signature saved!")
-                        st.rerun()
-                    else:
-                        st.warning("Canvas is empty — draw your signature first.")
-        except ImportError:
-            st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
+
+    with st.expander("✍️ Signature", expanded=False):
+        if st.session_state.get("signature_b64"):
+            st.success("Signature on file ✓")
+            if st.button("🗑️ Clear Signature", key="u_clrsig"):
+                clear_signature()
+                st.rerun()
+        else:
+            try:
+                from streamlit_drawable_canvas import st_canvas
+                sig_canvas = st_canvas(
+                    fill_color="rgba(255,255,255,0)",
+                    stroke_width=2,
+                    stroke_color="#cc0000",
+                    background_color="#ffffff",
+                    height=80, width=300, drawing_mode="freedraw", key="sig_canvas")
+                if st.button("💾 Save Signature", key="u_savesig"):
+                    if sig_canvas.image_data is not None:
+                        arr = sig_canvas.image_data
+                        if arr.max() > 0:
+                            save_signature(arr)
+                            st.success("Signature saved!")
+                            st.rerun()
+                        else:
+                            st.warning("Canvas is empty — draw your signature first.")
+            except ImportError:
+                st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
 
     st.divider()
 
     with st.expander("🧰 Tester Info / Defaults", expanded=False):
         st.caption("Fill once — carries forward on Next Report and New Job.")
         t1, t2, t3 = st.columns(3)
-        f["gauge_mfg"]    = t1.text_input("Gauge Manufacturer", f.get("gauge_mfg",""),    key="u_gmfg")
-        f["gauge_serial"] = t2.text_input("Gauge Serial #",     f.get("gauge_serial",""), key="u_gsn")
-        f["date_cal"]     = t3.text_input("Date Calibrated",    f.get("date_cal",""),     key="u_cal")
+        text_input_autosave("Gauge Manufacturer", f, "gauge_mfg",    "u_gmfg",   container=t1)
+        text_input_autosave("Gauge Serial #",     f, "gauge_serial", "u_gsn",    container=t2)
+        text_input_autosave("Date Calibrated",    f, "date_cal",     "u_cal",    container=t3)
         t1b, t2b, t3b = st.columns(3)
-        f["technician"] = t1b.text_input("Technician",        f.get("technician",""), key="u_tech")
-        f["cert_no"]    = t2b.text_input("Certification No.", f.get("cert_no",""),    key="u_cert")
-        f["recert"]     = t3b.text_input("Re-Cert Due Date",  f.get("recert",""),     key="u_recert")
+        text_input_autosave("Technician",        f, "technician", "u_tech",   container=t1b)
+        text_input_autosave("Certification No.", f, "cert_no",    "u_cert",   container=t2b)
+        text_input_autosave("Re-Cert Due Date",  f, "recert",     "u_recert", container=t3b)
 
     st.divider()
 
@@ -797,19 +823,21 @@ else:
 
     st.divider()
 
+    # Property & Contact — sticky on Next Report (same job)
     st.subheader("📋 Property & Contact Information")
     c1, c2 = st.columns(2)
-    f["premises_name"]    = c1.text_input("Name of premises (company / person)", f.get("premises_name",""),    key="j_prem")
-    f["owner_name"]       = c2.text_input("Owner or agent's name",               f.get("owner_name",""),       key="j_own")
-    f["service_address"]  = c1.text_input("Service address",                      f.get("service_address",""),  key="j_sa")
-    f["mailing_address"]  = c2.text_input("Mailing address",                      f.get("mailing_address",""),  key="j_ma")
-    f["physical_location"]= c1.text_input("Physical location of device",          f.get("physical_location",""),key="j_pl")
-    f["contact_phone"]    = c2.text_input("Contact phone number",                 f.get("contact_phone",""),    key="j_ph")
-    f["jea_account"]      = c1.text_input("JEA account number",                   f.get("jea_account",""),      key="j_acct")
-    f["meter_number"]     = c2.text_input("Meter number",                         f.get("meter_number",""),     key="j_meter")
+    text_input_autosave("Name of premises (company / person)", f, "premises_name",    "j_prem",  container=c1)
+    text_input_autosave("Owner or agent's name",               f, "owner_name",       "j_own",   container=c2)
+    text_input_autosave("Service address",                      f, "service_address",  "j_sa",    container=c1)
+    text_input_autosave("Mailing address",                      f, "mailing_address",  "j_ma",    container=c2)
+    text_input_autosave("Physical location of device",          f, "physical_location","j_pl",    container=c1)
+    text_input_autosave("Contact phone number",                 f, "contact_phone",    "j_ph",    container=c2)
+    text_input_autosave("JEA account number",                   f, "jea_account",      "j_acct",  container=c1)
+    text_input_autosave("Meter number",                         f, "meter_number",     "j_meter", container=c2)
 
     st.divider()
 
+    # Test Purpose & Service — sticky on Next Report (same job)
     st.subheader("📝 Test Purpose & Service Type")
     tp_opts_comm = ["", "Annual", "Repair", "Replacement", "New Installation"]
     st_opts_comm = ["", "Fire", "Irrigation", "Process/Isolation", "Potable", "Fire bypass"]
@@ -837,12 +865,12 @@ else:
 
     st.subheader("🔩 Device Information")
     d1, d2, d3, d4, d5, d6 = st.columns(6)
-    f["device_type"]    = d1.text_input("Device type",        f.get("device_type",""),    key="j_dt")
-    f["manufacturer"]   = d2.text_input("Manufacturer",       f.get("manufacturer",""),   key="j_mfg")
-    f["size"]           = d3.text_input("Size",               f.get("size",""),           key="j_sz")
-    f["model_number"]   = d4.text_input("Model Number",       f.get("model_number",""),   key="j_mn")
-    f["serial_number"]  = d5.text_input("Serial Number",      f.get("serial_number",""),  key="j_sn")
-    f["install_date"]   = d6.text_input("Installation Date",  f.get("install_date",""),   key="j_id")
+    text_input_autosave("Device type",       f, "device_type",   "j_dt",  container=d1)
+    text_input_autosave("Manufacturer",      f, "manufacturer",  "j_mfg", container=d2)
+    text_input_autosave("Size",              f, "size",          "j_sz",  container=d3)
+    text_input_autosave("Model Number",      f, "model_number",  "j_mn",  container=d4)
+    text_input_autosave("Serial Number",     f, "serial_number", "j_sn",  container=d5)
+    text_input_autosave("Installation Date", f, "install_date",  "j_id",  container=d6)
 
     st.divider()
 
@@ -852,50 +880,51 @@ else:
     with it1:
         st.markdown("**Check Valve #1**")
         _radio("Result", ["Closed Tight"], "init_cv1_result", f, horizontal=True)
-        f["init_cv1_psi"] = st.text_input("at ___ psi", f.get("init_cv1_psi",""), key="j_icv1p")
+        text_input_autosave("at ___ psi", f, "init_cv1_psi", "j_icv1p")
 
     with it2:
         st.markdown("**Check Valve #2**")
         _radio("Result", ["Closed Tight"], "init_cv2_result", f, horizontal=True)
-        f["init_cv2_psi"] = st.text_input("at ___ psi", f.get("init_cv2_psi",""), key="j_icv2p")
+        text_input_autosave("at ___ psi", f, "init_cv2_psi", "j_icv2p")
 
     with it3:
         st.markdown("**DP RV Initial: Opened at**")
         _radio("Result", ["Opened At","Did Not Open"], "init_rv_result", f, horizontal=True)
-        f["init_rv_psi"] = st.text_input("lbs reduced pressure", f.get("init_rv_psi",""), key="j_irvp")
+        text_input_autosave("lbs reduced pressure", f, "init_rv_psi", "j_irvp")
 
     with it4:
         st.markdown("**Air Inlet Opened At**")
         _radio("Result", ["Air inlet opened at","Did not open"], "init_pvb_result", f, horizontal=True)
-        f["init_pvb_psi"] = st.text_input("psi", f.get("init_pvb_psi",""), key="j_ipvbp")
+        text_input_autosave("psi", f, "init_pvb_psi", "j_ipvbp")
 
-    f["init_test_date"] = st.text_input("Initial Test Date", f.get("init_test_date", date.today().strftime("%m/%d/%Y")), key="j_itd")
+    text_input_autosave("Initial Test Date", f, "init_test_date", "j_itd")
 
     st.divider()
 
-    st.subheader("✅ Final Test")
-    ft1, ft2, ft3, ft4 = st.columns(4)
+    # Final Test — hidden in expander since Wes only fills Initial
+    with st.expander("✅ Final Test (hidden by default)", expanded=False):
+        ft1, ft2, ft3, ft4 = st.columns(4)
 
-    with ft1:
-        st.markdown("**Check Valve #1**")
-        _radio("Result", ["Closed Tight"], "final_cv1_result", f, horizontal=True)
-        f["final_cv1_psi"] = st.text_input("at ___ psi", f.get("final_cv1_psi",""), key="j_fcv1p")
+        with ft1:
+            st.markdown("**Check Valve #1**")
+            _radio("Result", ["Closed Tight"], "final_cv1_result", f, horizontal=True)
+            text_input_autosave("at ___ psi", f, "final_cv1_psi", "j_fcv1p")
 
-    with ft2:
-        st.markdown("**Check Valve #2**")
-        _radio("Result", ["Closed Tight"], "final_cv2_result", f, horizontal=True)
-        f["final_cv2_psi"] = st.text_input("at ___ psi", f.get("final_cv2_psi",""), key="j_fcv2p")
+        with ft2:
+            st.markdown("**Check Valve #2**")
+            _radio("Result", ["Closed Tight"], "final_cv2_result", f, horizontal=True)
+            text_input_autosave("at ___ psi", f, "final_cv2_psi", "j_fcv2p")
 
-    with ft3:
-        st.markdown("**Relief Valve**")
-        _radio("Result", ["Opened At"], "final_rv_result", f, horizontal=True)
-        f["final_rv_psi"] = st.text_input("lbs reduced pressure", f.get("final_rv_psi",""), key="j_frvp")
+        with ft3:
+            st.markdown("**Relief Valve**")
+            _radio("Result", ["Opened At"], "final_rv_result", f, horizontal=True)
+            text_input_autosave("lbs reduced pressure", f, "final_rv_psi", "j_frvp")
 
-    with ft4:
-        st.markdown("**PVB**")
-        _radio("Result", ["Satisfactory"], "final_pvb_result", f, horizontal=True)
+        with ft4:
+            st.markdown("**PVB**")
+            _radio("Result", ["Satisfactory"], "final_pvb_result", f, horizontal=True)
 
-    f["final_test_date"] = st.text_input("Final Test Date", f.get("final_test_date", date.today().strftime("%m/%d/%Y")), key="j_ftd")
+        text_input_autosave("Final Test Date", f, "final_test_date", "j_ftd")
 
     res_opts = ["", "PASSED", "FAILED"]
     f["assembly_result"] = st.radio("Pass / Fail Certification", res_opts,
@@ -909,53 +938,57 @@ else:
 
     st.divider()
 
-    st.subheader("🖊️ Tester Information")
-    ti1, ti2, ti3, ti4 = st.columns(4)
-    f["init_tester_name"] = ti1.text_input("Initial tester name ↺", f.get("init_tester_name",""), key="j_itn")
-    f["init_company"]     = ti2.text_input("Company ↺",              f.get("init_company",""),     key="j_ico")
-    f["init_cert"]        = ti3.text_input("Cert # ↺",               f.get("init_cert",""),        key="j_ic")
-    f["init_test_date"]   = ti4.text_input("Test date",              f.get("init_test_date", date.today().strftime("%m/%d/%Y")), key="j_itd2")
+    # Tester Information — sticky across all jobs (hidden in expander)
+    with st.expander("🖊️ Tester Information", expanded=False):
+        st.caption("Fill once — carries forward on every report and new job.")
+        ti1, ti2, ti3, ti4 = st.columns(4)
+        text_input_autosave("Initial tester name ↺", f, "init_tester_name", "j_itn", container=ti1)
+        text_input_autosave("Company ↺",              f, "init_company",     "j_ico", container=ti2)
+        text_input_autosave("Cert # ↺",               f, "init_cert",        "j_ic",  container=ti3)
+        text_input_autosave("Test date",              f, "init_test_date",   "j_itd2",container=ti4)
 
-    ri1, ri2, ri3, ri4 = st.columns(4)
-    f["repaired_by"]    = ri1.text_input("Repaired by",     f.get("repaired_by",""),    key="j_rb")
-    f["repair_company"] = ri2.text_input("Repair company",  f.get("repair_company",""), key="j_rco")
-    f["repair_cert"]    = ri3.text_input("Repair cert #",   f.get("repair_cert",""),    key="j_rc")
-    f["repair_date"]    = ri4.text_input("Repair date",     f.get("repair_date",""),    key="j_rd")
+        ri1, ri2, ri3, ri4 = st.columns(4)
+        text_input_autosave("Repaired by",     f, "repaired_by",    "j_rb",  container=ri1)
+        text_input_autosave("Repair company",  f, "repair_company", "j_rco", container=ri2)
+        text_input_autosave("Repair cert #",   f, "repair_cert",    "j_rc",  container=ri3)
+        text_input_autosave("Repair date",     f, "repair_date",    "j_rd",  container=ri4)
 
-    fi1, fi2, fi3, fi4 = st.columns(4)
-    f["final_tester_name"] = fi1.text_input("Final tester name ↺", f.get("final_tester_name",""), key="j_ftn")
-    f["final_company"]     = fi2.text_input("Company ↺",             f.get("final_company",""),     key="j_fco")
-    f["final_cert"]        = fi3.text_input("Cert # ↺",              f.get("final_cert",""),        key="j_fc")
-    f["final_test_date"]   = fi4.text_input("Test date",             f.get("final_test_date", date.today().strftime("%m/%d/%Y")), key="j_ftd2")
-    f["signature_date"]    = st.text_input("Signature date",         f.get("signature_date",""),    key="j_sd")
+        fi1, fi2, fi3, fi4 = st.columns(4)
+        text_input_autosave("Final tester name ↺", f, "final_tester_name", "j_ftn", container=fi1)
+        text_input_autosave("Company ↺",             f, "final_company",     "j_fco", container=fi2)
+        text_input_autosave("Cert # ↺",              f, "final_cert",        "j_fc",  container=fi3)
+        text_input_autosave("Test date",             f, "final_test_date",   "j_ftd2",container=fi4)
+        text_input_autosave("Signature date",        f, "signature_date",    "j_sd")
 
     st.divider()
-    st.subheader("✍️ Signature")
-    if st.session_state.get("signature_b64"):
-        st.success("Signature on file ✓")
-        if st.button("🗑️ Clear Signature", key="j_clrsig"):
-            clear_signature()
-            st.rerun()
-    else:
-        try:
-            from streamlit_drawable_canvas import st_canvas
-            sig_canvas = st_canvas(
-                fill_color="rgba(255,255,255,0)",
-                stroke_width=2,
-                stroke_color="#cc0000",
-                background_color="#ffffff",
-                height=80, width=300, drawing_mode="freedraw", key="j_sig_canvas")
-            if st.button("💾 Save Signature", key="j_savesig"):
-                if sig_canvas.image_data is not None:
-                    arr = sig_canvas.image_data
-                    if arr.max() > 0:
-                        save_signature(arr)
-                        st.success("Signature saved!")
-                        st.rerun()
-                    else:
-                        st.warning("Canvas is empty — draw your signature first.")
-        except ImportError:
-            st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
+
+    # Signature — hidden in expander since it's saved to disk
+    with st.expander("✍️ Signature", expanded=False):
+        if st.session_state.get("signature_b64"):
+            st.success("Signature on file ✓")
+            if st.button("🗑️ Clear Signature", key="j_clrsig"):
+                clear_signature()
+                st.rerun()
+        else:
+            try:
+                from streamlit_drawable_canvas import st_canvas
+                sig_canvas = st_canvas(
+                    fill_color="rgba(255,255,255,0)",
+                    stroke_width=2,
+                    stroke_color="#cc0000",
+                    background_color="#ffffff",
+                    height=80, width=300, drawing_mode="freedraw", key="j_sig_canvas")
+                if st.button("💾 Save Signature", key="j_savesig"):
+                    if sig_canvas.image_data is not None:
+                        arr = sig_canvas.image_data
+                        if arr.max() > 0:
+                            save_signature(arr)
+                            st.success("Signature saved!")
+                            st.rerun()
+                        else:
+                            st.warning("Canvas is empty — draw your signature first.")
+            except ImportError:
+                st.warning("`pip install streamlit-drawable-canvas` to enable signature pad.")
 
     st.divider()
 
