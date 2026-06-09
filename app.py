@@ -151,9 +151,9 @@ JAX_CHECKBOXES = {
     "RES_RECLAIM_YES":       (434, 466),
     "RES_RECLAIM_NO":        (472, 464),
     "INIT_CV1_CLOSED":       (139, 363),
-    "INIT_CV1_LEAKED":       (138, 325),
+    # INIT_CV1_LEAKED removed
     "INIT_CV2_CLOSED":       (235, 362),
-    "INIT_CV2_LEAKED":       (235, 325),
+    # INIT_CV2_LEAKED removed
     "INIT_RV_OPENED":        (331, 356),
     "INIT_RV_DIDNOT":        (336, 329),
     "INIT_PVB_AIOPEN":       (445, 359),
@@ -459,21 +459,27 @@ def generate_jax_pdf(form):
     if res_rcl == "Yes":  draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_YES"])
     elif res_rcl == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
 
+    # CV1 Initial — Closed Tight only (Leaked removed)
     icv1 = form.get("init_cv1_result", "")
-    if icv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
-    elif icv1 == "Leaked":     draw_x(c, *JAX_CHECKBOXES["INIT_CV1_LEAKED"])
+    if icv1 == "Closed Tight":
+        draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
 
+    # CV2 Initial — Closed Tight only (Leaked removed)
     icv2 = form.get("init_cv2_result", "")
-    if icv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
-    elif icv2 == "Leaked":     draw_x(c, *JAX_CHECKBOXES["INIT_CV2_LEAKED"])
+    if icv2 == "Closed Tight":
+        draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
 
+    # DP RV Initial: Opened At checkbox + psi text field
     irv = form.get("init_rv_result", "")
     if irv == "Opened At":      draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
+    # init_rv_psi is rendered via JAX_TEXT_FIELDS
 
+    # Air Inlet Opened At checkbox + psi text field
     ipvb = form.get("init_pvb_result", "")
     if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
     elif ipvb == "Did not open":      draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
+    # init_pvb_psi is rendered via JAX_TEXT_FIELDS
 
     fcv1 = form.get("final_cv1_result", "")
     if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
@@ -845,12 +851,12 @@ else:
 
     with it1:
         st.markdown("**Check Valve #1**")
-        _radio("Result", ["Closed Tight","Leaked"], "init_cv1_result", f, horizontal=True)
+        _radio("Result", ["Closed Tight"], "init_cv1_result", f, horizontal=True)
         f["init_cv1_psi"] = st.text_input("at ___ psi", f.get("init_cv1_psi",""), key="j_icv1p")
 
     with it2:
         st.markdown("**Check Valve #2**")
-        _radio("Result", ["Closed Tight","Leaked"], "init_cv2_result", f, horizontal=True)
+        _radio("Result", ["Closed Tight"], "init_cv2_result", f, horizontal=True)
         f["init_cv2_psi"] = st.text_input("at ___ psi", f.get("init_cv2_psi",""), key="j_icv2p")
 
     with it3:
