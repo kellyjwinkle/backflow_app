@@ -5,7 +5,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 import json, os, re, base64, tempfile
 from datetime import date
-from pdfrw import PdfReader, PdfWriter, PageMerge
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ContentStream
 from PIL import Image
 import numpy as np
 
@@ -23,10 +24,9 @@ def _get_pdf_page_size(path):
     try:
         reader = PdfReader(path)
         page = reader.pages[0]
-        mb = page.MediaBox
-        # MediaBox is [llx, lly, urx, ury]
-        w = float(mb[2]) - float(mb[0])
-        h = float(mb[3]) - float(mb[1])
+        mb = page.mediabox
+        w = float(mb.width)
+        h = float(mb.height)
         return w, h
     except Exception:
         return 595, 842  # fall back to A4
@@ -34,7 +34,7 @@ def _get_pdf_page_size(path):
 if os.path.exists(TEMPLATE_JAX):
     JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
 else:
-    JAX_PAGE_W, JAX_PAGE_H = 595, 842
+    JAX_PAGE_W, JAX_PAGE_H = 612, 792
 
 # ---------------------------------------------------------------------------
 # "United Fire" form config (existing form)
@@ -111,8 +111,8 @@ JAX_TEXT_FIELDS = {
     "install_date":         (468, 399, 9),
     "init_cv1_psi":         (148, 317, 9),
     "init_cv2_psi":         (248, 316, 9),
-    "init_rv_psi":          (402, 334, 9),   # DP RV Initial: Opened at (PSI value)
-    "init_pvb_psi":         (479, 316, 9),   # Air Inlet Opened At (PSI value)
+    "init_rv_psi":          (402, 334, 9),
+    "init_pvb_psi":         (479, 316, 9),
     "final_cv1_psi":        (167, 264, 9),
     "final_cv2_psi":        (269, 266, 9),
     "final_rv_psi":         (414, 283, 9),
@@ -158,9 +158,9 @@ JAX_CHECKBOXES = {
     "INIT_CV1_LEAKED":      (142, 304),
     "INIT_CV2_CLOSED":      (242, 340),
     "INIT_CV2_LEAKED":      (242, 304),
-    "INIT_RV_OPENED":       (341, 335),   # DP RV Initial: Opened at (checkbox)
+    "INIT_RV_OPENED":       (341, 335),
     "INIT_RV_DIDNOT":       (344, 309),
-    "INIT_PVB_AIOPEN":      (458, 336),   # Air Inlet Opened At (checkbox)
+    "INIT_PVB_AIOPEN":      (458, 336),
     "INIT_PVB_AIDNOT":      (462, 303),
     "FINAL_CV1_CLOSED":     (142, 286),
     "FINAL_CV2_CLOSED":     (241, 286),
@@ -259,28 +259,34 @@ def get_signature_image_reader():
 # ---------------------------------------------------------------------------
 
 def _merge_overlay(template_path, overlay_buf):
-    """Merge a ReportLab overlay canvas buffer onto page 0 of a template PDF."""
+    """Merge a ReportLab overlay canvas buffer onto page 0 of a template PDF using pypdf."""
     if not os.path.exists(template_path):
         st.error(f"Template not found: {template_path}")
         st.stop()
+
     overlay_buf.seek(0)
-    tp = PdfReader(template_path)
-    op = PdfReader(overlay_buf)
-    pg = tp.pages[0]
-    PageMerge(pg).add(op.pages[0]).render()
-    if pg.Annots:
-        pg.Annots = []
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp_path = tmp.name
-    try:
-        PdfWriter().write(tmp_path, tp)
-        with open(tmp_path, "rb") as fh:
-            return fh.read()
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+
+    # Read template and overlay
+    template_reader = PdfReader(template_path)
+    overlay_reader  = PdfReader(overlay_buf)
+
+    writer = PdfWriter()
+
+    # Clone ALL pages from template first
+    for page in template_reader.pages:
+        writer.add_page(page)
+
+    # Merge overlay onto page 0
+    writer.pages[0].merge_page(overlay_reader.pages[0])
+
+    # Strip interactive form fields so they don't conflict
+    if "/AcroForm" in writer._root_object:
+        del writer._root_object["/AcroForm"]
+
+    out_buf = BytesIO()
+    writer.write(out_buf)
+    out_buf.seek(0)
+    return out_buf.read()
 
 
 def generate_united_pdf(form):
@@ -349,7 +355,6 @@ def generate_united_pdf(form):
 
 def generate_jax_pdf(form):
     overlay_buf = BytesIO()
-    # Use the actual page dimensions read from the template file
     c = canvas.Canvas(overlay_buf, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
 
     for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
@@ -730,8 +735,8 @@ else:
     with col3:
         if st.button("🗑️ Clear Form", key="j_clear"):
             st.session_state.jax_form = {
-                "init_test_date":  date.today().strftime("%m/%d/%Y"),
-                "final_test_date": date.today().strftime("%m/%d/%Y"),
+                "init_test_date":  date.today().strftime("%m/%d/%Y")
+                ,"final_test_date": date.today().strftime("%m/%d/%Y"),
             }
             st.rerun()
 
@@ -804,12 +809,12 @@ else:
         f["init_cv2_psi"] = st.text_input("at ___ psi", f.get("init_cv2_psi",""), key="j_icv2p")
 
     with it3:
-        st.markdown("**Differential Pressure Relief Valve**")
+        st.markdown("**DP RV Initial: Opened at**")
         _radio("Result", ["Opened At","Did Not Open"], "init_rv_result", f, horizontal=True)
         f["init_rv_psi"] = st.text_input("lbs reduced pressure", f.get("init_rv_psi",""), key="j_irvp")
 
     with it4:
-        st.markdown("**Pressure Vacuum Breaker / Air Inlet**")
+        st.markdown("**Air Inlet Opened At**")
         _radio("Result", ["Air inlet opened at","Did not open"], "init_pvb_result", f, horizontal=True)
         f["init_pvb_psi"] = st.text_input("psi", f.get("init_pvb_psi",""), key="j_ipvbp")
 
