@@ -195,6 +195,23 @@ UNITED_GREEN = {
 UNITED_NEXT_REPORT_KEEP = UNITED_YELLOW | UNITED_BLUE
 UNITED_NEW_JOB_KEEP = UNITED_YELLOW
 
+# Widget keys that correspond to GREEN fields (need session state cleared after PDF)
+UNITED_GREEN_WIDGET_KEYS = [
+    "u_loc", "u_cv1dp", "u_cv2dp", "u_rvpsi", "u_aipsi", "u_cvpsi",
+    "u_tdate", "u_rep",
+    "cv1_result", "cv2_result", "rv_result", "rv_out_result",
+    "rv_in_result", "pvb_ai_result", "pvb_cv_result", "assembly_result",
+]
+
+# Widget keys that correspond to YELLOW (tester) fields
+UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
+
+# Widget keys that correspond to BLUE fields
+UNITED_BLUE_WIDGET_KEYS = [
+    "u_date", "u_branch", "u_ahj", "u_cust", "u_addr",
+    "u_sn", "u_mfg", "u_mdl", "u_sz",
+]
+
 # ---------------------------------------------------------------------------
 # Jacksonville (JEA) form config
 # ---------------------------------------------------------------------------
@@ -360,11 +377,7 @@ def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
 
 
 def reset_blue_focus_flags():
-    blue_widget_keys = [
-        "u_date", "u_branch", "u_ahj", "u_cust", "u_addr",
-        "u_sn", "u_mfg", "u_mdl", "u_sz",
-    ]
-    for wk in blue_widget_keys:
+    for wk in UNITED_BLUE_WIDGET_KEYS:
         st.session_state.pop(f"{wk}_focused", None)
         st.session_state.pop(f"{wk}_do_clear", None)
 
@@ -429,8 +442,6 @@ def save_signature(img_array):
 # Excel export helpers
 # ===========================================================================
 
-# Column definitions for each form type
-# Each entry: (column_header, form_field_key)
 UNITED_EXCEL_COLS = [
     ("Date",              "date"),
     ("Branch",            "branch"),
@@ -523,8 +534,7 @@ JAX_EXCEL_COLS = [
 
 
 def _style_header_row(ws, num_cols):
-    """Apply dark header styling to row 1."""
-    header_fill = PatternFill("solid", fgColor="1F3864")  # dark navy
+    header_fill = PatternFill("solid", fgColor="1F3864")
     header_font = Font(bold=True, color="FFFFFF", size=10)
     thin = Side(style="thin", color="AAAAAA")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -538,7 +548,6 @@ def _style_header_row(ws, num_cols):
 
 
 def _style_data_row(ws, row_idx, num_cols, pass_fail_col_idx):
-    """Zebra-stripe data rows; highlight Pass/Fail cell."""
     thin = Side(style="thin", color="DDDDDD")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     bg = "EEF2F7" if row_idx % 2 == 0 else "FFFFFF"
@@ -551,7 +560,6 @@ def _style_data_row(ws, row_idx, num_cols, pass_fail_col_idx):
         cell.alignment = Alignment(vertical="center", wrap_text=True)
         cell.border = border
 
-    # Highlight Pass/Fail cell
     pf_cell = ws.cell(row=row_idx, column=pass_fail_col_idx)
     val = str(pf_cell.value or "").upper()
     if val == "PASSED":
@@ -563,12 +571,6 @@ def _style_data_row(ws, row_idx, num_cols, pass_fail_col_idx):
 
 
 def _build_summary_sheet(wb, job_folder):
-    """
-    Add a 'Summary' sheet as the first sheet in the workbook.
-    Columns: Form Type | Location | Pass / Fail
-    Sorted by: Form Type, then Location.
-    """
-    # Gather rows
     rows = []
     for item in job_folder:
         fd = item.get("form_data", {})
@@ -592,18 +594,14 @@ def _build_summary_sheet(wb, job_folder):
         result = str(fd.get("assembly_result", "")).strip().upper() or "—"
         rows.append((form_label, location or "—", result))
 
-    # Sort: form type A→Z, then location A→Z
     rows.sort(key=lambda r: (r[0], r[1]))
 
-    # Create sheet and insert as first sheet
     ws = wb.create_sheet("Summary", 0)
 
-    # Header
     headers = ["Form Type", "Location / Customer", "Pass / Fail"]
     ws.append(headers)
     _style_header_row(ws, len(headers))
 
-    # Totals tracking
     passed_count = 0
     failed_count = 0
 
@@ -616,21 +614,18 @@ def _build_summary_sheet(wb, job_folder):
         bg = "EEF2F7" if i % 2 == 0 else "FFFFFF"
         base_fill = PatternFill("solid", fgColor=bg)
 
-        # Form Type cell — subtle color-code by form type
         ft_cell = ws.cell(row=i, column=1)
         ft_cell.fill = base_fill
         ft_cell.font = Font(size=10)
         ft_cell.alignment = Alignment(vertical="center")
         ft_cell.border = border
 
-        # Location cell
         loc_cell = ws.cell(row=i, column=2)
         loc_cell.fill = base_fill
         loc_cell.font = Font(size=10)
         loc_cell.alignment = Alignment(vertical="center")
         loc_cell.border = border
 
-        # Pass/Fail cell — green / red highlight
         pf_cell = ws.cell(row=i, column=3)
         pf_cell.border = border
         pf_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -646,11 +641,9 @@ def _build_summary_sheet(wb, job_folder):
             pf_cell.fill = base_fill
             pf_cell.font = Font(size=10, color="888888")
 
-    # Blank spacer row
     spacer_row = len(rows) + 2
     ws.append([])
 
-    # Totals row
     total_row = spacer_row + 1
     ws.cell(row=total_row, column=1).value = f"Total Reports: {len(rows)}"
     ws.cell(row=total_row, column=1).font = Font(bold=True, size=10)
@@ -659,7 +652,6 @@ def _build_summary_sheet(wb, job_folder):
     ws.cell(row=total_row, column=3).value = f"Failed: {failed_count}"
     ws.cell(row=total_row, column=3).font = Font(bold=True, color="9C0006", size=10)
 
-    # Column widths
     ws.column_dimensions["A"].width = 18
     ws.column_dimensions["B"].width = 40
     ws.column_dimensions["C"].width = 14
@@ -667,30 +659,19 @@ def _build_summary_sheet(wb, job_folder):
 
 
 def build_excel_for_job(job_folder: list, job_name: str) -> bytes:
-    """
-    Build an Excel workbook with three sheets:
-      - 'Summary'      — form type, location, pass/fail for every report (sorted)
-      - 'United Fire'  — one row per United Fire PDF in the job
-      - 'Jacksonville' — one row per JAX PDF in the job
-    Returns the workbook as bytes.
-    """
     wb = openpyxl.Workbook()
 
-    # Remove the default empty sheet; we'll create named sheets manually
     default_sheet = wb.active
     wb.remove(default_sheet)
 
-    # --- Summary sheet (inserted as sheet 0 inside _build_summary_sheet) ---
     _build_summary_sheet(wb, job_folder)
 
-    # --- United Fire sheet ---
     ws_u = wb.create_sheet("United Fire")
     u_headers = [h for h, _ in UNITED_EXCEL_COLS]
     ws_u.append(u_headers)
     pf_u = next((i+1 for i, (h, _) in enumerate(UNITED_EXCEL_COLS) if h == "Pass / Fail"), 1)
     _style_header_row(ws_u, len(u_headers))
 
-    # --- Jacksonville sheet ---
     ws_j = wb.create_sheet("Jacksonville")
     j_headers = [h for h, _ in JAX_EXCEL_COLS]
     ws_j.append(j_headers)
@@ -709,13 +690,12 @@ def build_excel_for_job(job_folder: list, job_name: str) -> bytes:
             ws_u.append(row)
             _style_data_row(ws_u, u_row, len(u_headers), pf_u)
             u_row += 1
-        else:  # jax
+        else:
             row = [form_data.get(fk, "") for _, fk in JAX_EXCEL_COLS]
             ws_j.append(row)
             _style_data_row(ws_j, j_row, len(j_headers), pf_j)
             j_row += 1
 
-    # Auto-size columns on detail sheets (cap at 40)
     for ws in [ws_u, ws_j]:
         for col_cells in ws.columns:
             max_len = max((len(str(c.value or "")) for c in col_cells), default=8)
@@ -737,7 +717,6 @@ def _init_job_folder():
 
 
 def add_to_job_folder(pdf_bytes: bytes, filename: str, form_data: dict, form_type: str):
-    """Store a PDF + its source form data in the job folder."""
     _init_job_folder()
     st.session_state.job_folder = [
         f for f in st.session_state.job_folder if f["name"] != filename
@@ -751,23 +730,19 @@ def add_to_job_folder(pdf_bytes: bytes, filename: str, form_data: dict, form_typ
 
 
 def build_zip() -> bytes:
-    """Build ZIP containing all PDFs plus an Excel summary report."""
     folder = st.session_state.job_folder
     job_name = st.session_state.get("job_folder_name", "").strip() or "Job"
 
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Add all PDFs
         for item in folder:
             zf.writestr(item["name"], item["bytes"])
 
-        # Add Excel summary
         try:
             excel_bytes = build_excel_for_job(folder, job_name)
             excel_name = re.sub(r"[^\w\s\-]", "", job_name).strip() or "Job"
             zf.writestr(f"{excel_name} - Report Summary.xlsx", excel_bytes)
         except Exception as e:
-            # Never let Excel failure block the ZIP download
             zf.writestr("excel_error.txt", f"Excel export failed: {e}")
 
     buf.seek(0)
@@ -1055,6 +1030,20 @@ def _radio(label, options, key, form, **kwargs):
 # Technician selector sidebar widget
 # ===========================================================================
 
+TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
+
+
+def _apply_tester_profile_to_form(form: dict, profile: dict):
+    """Write tester profile values into the form dict AND clear widget keys so
+    the text_input widgets re-read from form on next render."""
+    for k in TESTER_KEYS:
+        val = profile.get(k, "")
+        form[k] = val
+    # Clear widget session-state so clearable_input re-renders with new values
+    for wk in UNITED_TESTER_WIDGET_KEYS:
+        st.session_state.pop(wk, None)
+
+
 def render_technician_sidebar():
     _init_technicians()
     st.sidebar.markdown("---")
@@ -1072,14 +1061,26 @@ def render_technician_sidebar():
         key="tech_selector",
     )
 
-    if selected and selected != st.session_state.get("active_technician", ""):
-        profile = get_technician_profile(selected)
+    if selected != st.session_state.get("active_technician", ""):
         st.session_state["active_technician"] = selected
-        st.session_state["signature_b64"] = profile.get("signature_b64", "")
-        st.session_state["tester_defaults"] = {
-            k: profile.get(k, "") for k in
-            ["technician", "cert_no", "recert", "gauge_mfg", "gauge_serial", "date_cal"]
-        }
+        if selected:
+            profile = get_technician_profile(selected)
+            st.session_state["signature_b64"] = profile.get("signature_b64", "")
+            # Push profile values into whichever form is active
+            if "united_form" in st.session_state:
+                _apply_tester_profile_to_form(st.session_state["united_form"], profile)
+            if "jax_form" in st.session_state:
+                jax_tech_map = {
+                    "init_tester_name": "technician",
+                    "init_cert":        "cert_no",
+                    "final_tester_name": "technician",
+                    "final_cert":        "cert_no",
+                }
+                for form_key, profile_key in jax_tech_map.items():
+                    st.session_state["jax_form"][form_key] = profile.get(profile_key, "")
+                # Clear jax tester widget keys
+                for wk in ["j_itn", "j_ic", "j_ftn", "j_fc"]:
+                    st.session_state.pop(wk, None)
         st.rerun()
 
     if not selected:
@@ -1148,6 +1149,9 @@ def render_technician_sidebar():
                 st.session_state["active_technician"] = key_name
                 _, new_sha = load_technicians_from_github()
                 st.session_state["technicians_sha"] = new_sha
+                # Re-apply updated profile to open forms
+                if "united_form" in st.session_state:
+                    _apply_tester_profile_to_form(st.session_state["united_form"], updated_profile)
             else:
                 st.error(msg)
 
@@ -1195,14 +1199,13 @@ st.title("🔧 Backflow Preventer Test Report")
 # ---------------------------------------------------------------------------
 # Tester defaults helper
 # ---------------------------------------------------------------------------
-TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
 
 def get_tester_defaults():
     active = st.session_state.get("active_technician", "")
     if active:
         profile = get_technician_profile(active)
         return {k: profile.get(k, "") for k in TESTER_KEYS}
-    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
+    return {k: "" for k in TESTER_KEYS}
 
 def save_tester_defaults(form):
     st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
@@ -1231,13 +1234,6 @@ if form_choice == "United Fire (Standard)":
         st.session_state.united_form = f0
 
     f = st.session_state.united_form
-
-    active = st.session_state.get("active_technician", "")
-    if active:
-        profile = get_technician_profile(active)
-        for k in TESTER_KEYS:
-            if not f.get(k) and profile.get(k):
-                f[k] = profile[k]
 
     st.divider()
     st.subheader("📋 Job Information")
@@ -1394,12 +1390,10 @@ if form_choice == "United Fire (Standard)":
                 deliver_pdf(pdf_bytes, fname)
                 st.success(f"✅ PDF ready: {fname}  |  Added to Job Folder ({len(st.session_state.job_folder)} total)")
 
+                # Clear GREEN fields from form dict and all their widget keys
                 for green_key in UNITED_GREEN:
                     f[green_key] = ""
-                for radio_key in ["cv1_result","cv2_result","rv_result","rv_out_result",
-                                  "rv_in_result","pvb_ai_result","pvb_cv_result","assembly_result"]:
-                    st.session_state.pop(radio_key, None)
-                for wk in ["u_cv1dp","u_cv2dp","u_rvpsi","u_aipsi","u_cvpsi","u_tdate","u_loc","u_rep"]:
+                for wk in UNITED_GREEN_WIDGET_KEYS:
                     st.session_state.pop(wk, None)
                 reset_blue_focus_flags()
 
@@ -1418,6 +1412,9 @@ if form_choice == "United Fire (Standard)":
                 kept["test_date"] = date.today().strftime("%m/%d/%Y")
                 save_tester_defaults(f)
                 st.session_state.united_form = kept
+                # Clear ALL widget keys so form re-reads from kept dict
+                for wk in UNITED_GREEN_WIDGET_KEYS + UNITED_BLUE_WIDGET_KEYS + UNITED_TESTER_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
                 reset_blue_focus_flags()
                 st.session_state["u_show_next_action"] = False
                 st.rerun()
@@ -1430,6 +1427,8 @@ if form_choice == "United Fire (Standard)":
                 f0["test_date"] = date.today().strftime("%m/%d/%Y")
                 st.session_state.united_form = f0
                 st.session_state.job_folder = []
+                for wk in UNITED_GREEN_WIDGET_KEYS + UNITED_BLUE_WIDGET_KEYS + UNITED_TESTER_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
                 reset_blue_focus_flags()
                 st.session_state["u_show_next_action"] = False
                 st.rerun()
@@ -1451,6 +1450,7 @@ else:
 
     f = st.session_state.jax_form
 
+    # On first load (or after a rerun), ensure tester fields are populated from active profile
     active = st.session_state.get("active_technician", "")
     if active:
         profile = get_technician_profile(active)
