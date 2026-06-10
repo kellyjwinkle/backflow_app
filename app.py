@@ -4,11 +4,25 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 import json, os, re, base64, tempfile, zipfile, requests
-from datetime import date
+from datetime import date, timedelta
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ContentStream
 from PIL import Image
 import numpy as np
+
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    EXCEL_AVAILABLE = True
+except ImportError:
+    EXCEL_AVAILABLE = False
+
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Paths & constants
@@ -35,6 +49,285 @@ if os.path.exists(TEMPLATE_JAX):
     JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
 else:
     JAX_PAGE_W, JAX_PAGE_H = 612, 792
+
+# ---------------------------------------------------------------------------
+# Supabase helpers
+# ---------------------------------------------------------------------------
+
+def _get_supabase_client():
+    """Return a Supabase client if credentials are configured, else None."""
+    if not SUPABASE_AVAILABLE:
+        return None
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception:
+        return None
+
+
+def save_record_to_supabase(form: dict, form_type: str, pdf_filename: str):
+    """
+    Insert a test record row into the Supabase `test_records` table.
+    Silently does nothing if Supabase is not configured.
+    Returns (success: bool, message: str)
+    """
+    client = _get_supabase_client()
+    if not client:
+        return False, "Supabase not configured — record not saved to database."
+
+    try:
+        # Parse test date for next_service_due calculation
+        raw_date = form.get("test_date") or form.get("init_test_date") or ""
+        try:
+            from datetime import datetime
+            parsed = datetime.strptime(raw_date, "%m/%d/%Y")
+            next_due = (parsed + timedelta(days=365)).strftime("%Y-%m-%d")
+            test_date_iso = parsed.strftime("%Y-%m-%d")
+        except Exception:
+            next_due = None
+            test_date_iso = None
+
+        record = {
+            "form_type":        form_type,
+            "test_date":        test_date_iso,
+            "customer_name":    form.get("customer_name") or form.get("premises_name") or "",
+            "street_address":   form.get("street_address") or form.get("service_address") or "",
+            "location":         form.get("location") or form.get("physical_location") or "",
+            "serial_number":    form.get("serial_number") or "",
+            "manufacturer":     form.get("manufacturer") or "",
+            "model":            form.get("model") or form.get("model_number") or "",
+            "size":             form.get("size") or "",
+            "assembly_type":    form.get("assembly_type") or form.get("device_type") or "",
+            "system_service":   form.get("system_service") or form.get("comm_service_type") or form.get("res_service_type") or "",
+            "assembly_result":  form.get("assembly_result") or "",
+            "cv1_result":       form.get("cv1_result") or form.get("init_cv1_result") or "",
+            "cv1_dp":           form.get("cv1_dp") or form.get("init_cv1_psi") or "",
+            "cv2_result":       form.get("cv2_result") or form.get("init_cv2_result") or "",
+            "cv2_dp":           form.get("cv2_dp") or form.get("init_cv2_psi") or "",
+            "rv_result":        form.get("rv_result") or form.get("init_rv_result") or "",
+            "rv_psi":           form.get("rv_psi") or form.get("init_rv_psi") or "",
+            "repair_desc":      form.get("repair_desc") or form.get("repairs") or "",
+            "technician":       form.get("technician") or form.get("init_tester_name") or "",
+            "cert_no":          form.get("cert_no") or form.get("init_cert") or "",
+            "next_service_due": next_due,
+            "pdf_filename":     pdf_filename,
+        }
+
+        result = client.table("test_records").insert(record).execute()
+        return True, "Record saved to database ✓"
+    except Exception as e:
+        return False, f"Database error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Excel report builder
+# ---------------------------------------------------------------------------
+
+UNITED_EXCEL_COLS = [
+    ("Date",            "test_date"),
+    ("Customer / Site", "customer_name"),
+    ("Street Address",  "street_address"),
+    ("Location",        "location"),
+    ("Serial #",        "serial_number"),
+    ("Manufacturer",    "manufacturer"),
+    ("Model",           "model"),
+    ("Size",            "size"),
+    ("Type",            "assembly_type"),
+    ("Service",         "system_service"),
+    ("Bypass",          "bypass"),
+    ("CV1 Result",      "cv1_result"),
+    ("CV1 DP (psi)",    "cv1_dp"),
+    ("CV2 Result",      "cv2_result"),
+    ("CV2 DP (psi)",    "cv2_dp"),
+    ("RV Result",       "rv_result"),
+    ("RV Opened (psi)", "rv_psi"),
+    ("Pass / Fail",     "assembly_result"),
+    ("Repairs",         "repair_desc"),
+    ("Technician",      "technician"),
+    ("Cert #",          "cert_no"),
+    ("Re-Cert Due",     "recert"),
+    ("Gauge Mfg",       "gauge_mfg"),
+    ("Gauge Serial",    "gauge_serial"),
+    ("Date Calibrated", "date_cal"),
+    ("Branch",          "branch"),
+    ("AHJ",             "ahj"),
+    ("PDF Filename",    "_pdf_filename"),
+]
+
+JAX_EXCEL_COLS = [
+    ("Initial Test Date",    "init_test_date"),
+    ("Premises Name",        "premises_name"),
+    ("Owner / Agent",        "owner_name"),
+    ("Service Address",      "service_address"),
+    ("Physical Location",    "physical_location"),
+    ("Contact Phone",        "contact_phone"),
+    ("JEA Account",          "jea_account"),
+    ("Meter #",              "meter_number"),
+    ("Device Type",          "device_type"),
+    ("Manufacturer",         "manufacturer"),
+    ("Size",                 "size"),
+    ("Model #",              "model_number"),
+    ("Serial #",             "serial_number"),
+    ("Install Date",         "install_date"),
+    ("Comm Test Purpose",    "comm_test_purpose"),
+    ("Comm Service Type",    "comm_service_type"),
+    ("Reclaimed (Comm)",     "comm_reclaim"),
+    ("Res Test Purpose",     "res_test_purpose"),
+    ("Res Service Type",     "res_service_type"),
+    ("Reclaimed (Res)",      "res_reclaim"),
+    ("Init CV1 Result",      "init_cv1_result"),
+    ("Init CV1 psi",         "init_cv1_psi"),
+    ("Init CV2 Result",      "init_cv2_result"),
+    ("Init CV2 psi",         "init_cv2_psi"),
+    ("Init RV Result",       "init_rv_result"),
+    ("Init RV psi",          "init_rv_psi"),
+    ("Final CV1 Result",     "final_cv1_result"),
+    ("Final CV1 psi",        "final_cv1_psi"),
+    ("Final CV2 Result",     "final_cv2_result"),
+    ("Final CV2 psi",        "final_cv2_psi"),
+    ("Final RV Result",      "final_rv_result"),
+    ("Final RV psi",         "final_rv_psi"),
+    ("Pass / Fail",          "assembly_result"),
+    ("Repairs",              "repairs"),
+    ("Initial Tester",       "init_tester_name"),
+    ("Init Company",         "init_company"),
+    ("Init Cert #",          "init_cert"),
+    ("Repaired By",          "repaired_by"),
+    ("Repair Company",       "repair_company"),
+    ("Repair Cert #",        "repair_cert"),
+    ("Repair Date",          "repair_date"),
+    ("Final Tester",         "final_tester_name"),
+    ("Final Company",        "final_company"),
+    ("Final Cert #",         "final_cert"),
+    ("Final Test Date",      "final_test_date"),
+    ("Signature Date",       "signature_date"),
+    ("PDF Filename",         "_pdf_filename"),
+]
+
+
+def build_excel_report(job_folder: list, job_name: str = "") -> bytes:
+    """
+    Build an .xlsx report from all records stored in job_folder.
+    Each item in job_folder must have keys: name, bytes, form_data, form_type.
+    Returns raw bytes of the Excel file.
+    """
+    wb = openpyxl.Workbook()
+
+    # Separate records by form type
+    united_records = [r for r in job_folder if r.get("form_type") == "united"]
+    jax_records    = [r for r in job_folder if r.get("form_type") == "jax"]
+
+    header_fill   = PatternFill("solid", fgColor="01696F")  # teal
+    header_font   = Font(bold=True, color="FFFFFF", size=10)
+    pass_fill     = PatternFill("solid", fgColor="D4EFCC")  # soft green
+    fail_fill     = PatternFill("solid", fgColor="F4CCCC")  # soft red
+    alt_fill      = PatternFill("solid", fgColor="F2F2F0")  # light gray
+    thin_border   = Border(
+        left=Side(style="thin", color="CCCCCC"),
+        right=Side(style="thin", color="CCCCCC"),
+        top=Side(style="thin", color="CCCCCC"),
+        bottom=Side(style="thin", color="CCCCCC"),
+    )
+
+    def _write_sheet(ws, records, col_defs):
+        ws.freeze_panes = "A2"
+
+        # Write header row
+        for col_idx, (header, _) in enumerate(col_defs, start=1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = thin_border
+        ws.row_dimensions[1].height = 30
+
+        # Write data rows
+        for row_idx, record in enumerate(records, start=2):
+            form_data = record.get("form_data", {})
+            is_alt = (row_idx % 2 == 0)
+
+            for col_idx, (header, field_key) in enumerate(col_defs, start=1):
+                if field_key == "_pdf_filename":
+                    val = record.get("name", "")
+                else:
+                    val = form_data.get(field_key, "")
+
+                cell = ws.cell(row=row_idx, column=col_idx, value=val or "")
+                cell.border = thin_border
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+                # Highlight pass/fail
+                if header == "Pass / Fail":
+                    if str(val).upper() == "PASSED":
+                        cell.fill = pass_fill
+                        cell.font = Font(bold=True, color="2D6A2D")
+                    elif str(val).upper() == "FAILED":
+                        cell.fill = fail_fill
+                        cell.font = Font(bold=True, color="8B0000")
+                elif is_alt:
+                    cell.fill = alt_fill
+
+        # Auto-size columns
+        for col_idx, (header, _) in enumerate(col_defs, start=1):
+            col_letter = get_column_letter(col_idx)
+            max_len = len(header)
+            for row_idx in range(2, len(records) + 2):
+                val = ws.cell(row=row_idx, column=col_idx).value or ""
+                max_len = max(max_len, min(len(str(val)), 40))
+            ws.column_dimensions[col_letter].width = max_len + 2
+
+    # Create sheets
+    created_any = False
+
+    if united_records:
+        ws_united = wb.active
+        ws_united.title = "United Fire Reports"
+        _write_sheet(ws_united, united_records, UNITED_EXCEL_COLS)
+        created_any = True
+    
+    if jax_records:
+        if not created_any:
+            ws_jax = wb.active
+            ws_jax.title = "Jacksonville Reports"
+        else:
+            ws_jax = wb.create_sheet("Jacksonville Reports")
+        _write_sheet(ws_jax, jax_records, JAX_EXCEL_COLS)
+        created_any = True
+
+    if not created_any:
+        ws = wb.active
+        ws.title = "Reports"
+        ws["A1"] = "No report data available."
+
+    # Summary sheet
+    ws_summary = wb.create_sheet("Summary")
+    ws_summary.column_dimensions["A"].width = 28
+    ws_summary.column_dimensions["B"].width = 20
+
+    summary_data = [
+        ("Job Name",               job_name or "—"),
+        ("Report Generated",        date.today().strftime("%m/%d/%Y")),
+        ("Total Reports",           len(job_folder)),
+        ("United Fire Reports",     len(united_records)),
+        ("Jacksonville Reports",    len(jax_records)),
+        ("Passed",                  sum(1 for r in job_folder if r.get("form_data", {}).get("assembly_result","").upper() == "PASSED")),
+        ("Failed",                  sum(1 for r in job_folder if r.get("form_data", {}).get("assembly_result","").upper() == "FAILED")),
+    ]
+
+    ws_summary["A1"] = "Job Summary"
+    ws_summary["A1"].font = Font(bold=True, size=14)
+    ws_summary.merge_cells("A1:B1")
+
+    for i, (label, value) in enumerate(summary_data, start=3):
+        ws_summary.cell(row=i, column=1, value=label).font = Font(bold=True)
+        ws_summary.cell(row=i, column=2, value=value)
+
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out.read()
+
 
 # ---------------------------------------------------------------------------
 # Technician profile helpers (GitHub-backed)
@@ -182,28 +475,21 @@ UNITED_REPAIR_BOX = (228, 200, 10, 3, 70)
 # ---------------------------------------------------------------------------
 # Field color groups for United Fire form
 # ---------------------------------------------------------------------------
-# YELLOW: always keep (tester info — loaded from profile)
 UNITED_YELLOW = {
     "gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert",
 }
-# BLUE: keep on Next Report (same job), clear on New Job, tap-to-clear on click
 UNITED_BLUE = {
     "date", "branch", "ahj", "customer_name", "street_address",
     "serial_number", "manufacturer", "model", "size",
     "assembly_type", "system_service", "bypass",
 }
-# GREEN: clear after generating PDF (test results)
-# Everything not yellow or blue — location, test readings, pass/fail, test_date, repair_desc
 UNITED_GREEN = {
     "location", "rv_psi", "cv1_dp", "cv2_dp", "pvb_ai_psi", "pvb_cv_psi",
     "test_date", "cv1_result", "cv2_result", "rv_result", "rv_out_result",
     "rv_in_result", "pvb_ai_result", "pvb_cv_result", "assembly_result", "repair_desc",
 }
 
-# What to keep for each action (derived from color groups above)
-# Next Report (same job): keep YELLOW + BLUE (everything except GREEN)
 UNITED_NEXT_REPORT_KEEP = UNITED_YELLOW | UNITED_BLUE
-# New Job: keep YELLOW only
 UNITED_NEW_JOB_KEEP = UNITED_YELLOW
 
 # ---------------------------------------------------------------------------
@@ -335,27 +621,15 @@ def wrap_text(text, w=58):
 # ---------------------------------------------------------------------------
 
 def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
-    """
-    Text input that clears its value when the user taps/clicks into it.
-
-    Uses a companion session-state flag (<widget_key>_focused) to detect
-    the first interaction. On the rerun triggered by on_change, if the flag
-    is not yet set we clear the value, set the flag, and rerun once more so
-    the user starts with a blank field.
-
-    Also includes a ✕ button for manual clearing.
-    """
     form = st.session_state[form_key]
     focus_flag = f"{widget_key}_focused"
 
-    # If flagged for clear-on-next-render, wipe the backing value now
     if st.session_state.get(f"{widget_key}_do_clear"):
         form[field_key] = ""
         st.session_state.pop(f"{widget_key}_do_clear", None)
         st.session_state.pop(widget_key, None)
 
     def _on_change():
-        # First interaction → schedule a clear and rerun
         if not st.session_state.get(focus_flag):
             st.session_state[f"{widget_key}_do_clear"] = True
             st.session_state[focus_flag] = True
@@ -383,7 +657,6 @@ def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
 
 
 def reset_blue_focus_flags():
-    """Call before rendering the form so tap-to-clear triggers fresh each report."""
     blue_widget_keys = [
         "u_date", "u_branch", "u_ahj", "u_cust", "u_addr",
         "u_sn", "u_mfg", "u_mdl", "u_sz",
@@ -394,14 +667,10 @@ def reset_blue_focus_flags():
 
 
 # ---------------------------------------------------------------------------
-# Standard clearable input (no tap-to-clear — for yellow/static fields)
+# Standard clearable input
 # ---------------------------------------------------------------------------
 
 def clearable_input(label, form_key, field_key, widget_key, **kwargs):
-    """
-    Text input with a ✕ clear button. No tap-to-clear behavior.
-    Used for yellow (always-keep) fields.
-    """
     form = st.session_state[form_key]
 
     col_input, col_btn = st.columns([5, 1])
@@ -409,978 +678,4 @@ def clearable_input(label, form_key, field_key, widget_key, **kwargs):
         val = st.text_input(
             label,
             value=form.get(field_key, ""),
-            key=widget_key,
-            **kwargs,
-        )
-        form[field_key] = st.session_state.get(widget_key, "")
-
-    with col_btn:
-        st.write("")
-        if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
-            st.session_state[form_key][field_key] = ""
-            st.session_state.pop(widget_key, None)
-            st.rerun()
-
-    return val
-
-
-# ---------------------------------------------------------------------------
-# Signature helpers
-# ---------------------------------------------------------------------------
-
-def get_signature_image_reader():
-    """Return ImageReader from session-state signature_b64, or None."""
-    b64 = st.session_state.get("signature_b64")
-    if b64:
-        try:
-            buf = BytesIO(base64.b64decode(b64))
-            buf.seek(0)
-            return ImageReader(buf)
-        except Exception:
-            return None
-    return None
-
-
-def clear_signature():
-    st.session_state.pop("signature_b64", None)
-
-
-def save_signature(img_array):
-    """Save drawn signature into session state (and current tech profile)."""
-    buf = BytesIO()
-    img = Image.fromarray(img_array.astype("uint8"), "RGBA")
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    st.session_state["signature_b64"] = b64
-    return b64
-
-
-# ---------------------------------------------------------------------------
-# Job folder
-# ---------------------------------------------------------------------------
-
-def _init_job_folder():
-    if "job_folder" not in st.session_state:
-        st.session_state.job_folder = []
-
-
-def add_to_job_folder(pdf_bytes: bytes, filename: str):
-    _init_job_folder()
-    st.session_state.job_folder = [
-        f for f in st.session_state.job_folder if f["name"] != filename
-    ]
-    st.session_state.job_folder.append({"name": filename, "bytes": pdf_bytes})
-
-
-def build_zip() -> bytes:
-    buf = BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for item in st.session_state.job_folder:
-            zf.writestr(item["name"], item["bytes"])
-    buf.seek(0)
-    return buf.read()
-
-
-def render_job_folder_sidebar():
-    _init_job_folder()
-    folder = st.session_state.job_folder
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📁 Job Folder")
-
-    if "job_folder_name" not in st.session_state:
-        st.session_state.job_folder_name = ""
-    st.session_state.job_folder_name = st.sidebar.text_input(
-        "Job name (for ZIP file)",
-        value=st.session_state.job_folder_name,
-        placeholder="e.g. Smith Residence",
-        key="job_name_input",
-    )
-
-    if not folder:
-        st.sidebar.caption("No reports yet. Generate a PDF to add it here.")
-        return
-
-    st.sidebar.caption(f"{len(folder)} report(s) in this job folder:")
-    for item in folder:
-        st.sidebar.markdown(f"• {item['name']}")
-
-    zip_bytes = build_zip()
-    entered_name = st.session_state.job_folder_name.strip()
-    if entered_name:
-        zip_name = re.sub(r"[^\w\s\-]", "", entered_name).strip()
-    else:
-        first_name = folder[0]["name"].replace(".pdf", "")
-        zip_name = re.sub(r" - [^-]+$", "", first_name)
-        zip_name = re.sub(r"[^\w\s\-]", "", zip_name).strip() or "Job"
-    zip_filename = f"{zip_name} - Reports.zip"
-
-    st.sidebar.download_button(
-        label=f"📦 Download ZIP ({len(folder)} report{'s' if len(folder)!=1 else ''})",
-        data=zip_bytes,
-        file_name=zip_filename,
-        mime="application/zip",
-        use_container_width=True,
-        key=f"zip_dl_{len(folder)}",
-    )
-    st.sidebar.caption("📱 iPhone/iPad: tap ZIP button → Share → Save to Files")
-
-    if st.sidebar.button("🗑️ Clear Job Folder", use_container_width=True, key="clear_folder"):
-        st.session_state.job_folder = []
-        st.session_state.job_folder_name = ""
-        st.rerun()
-
-
-# ---------------------------------------------------------------------------
-# PDF merge helper
-# ---------------------------------------------------------------------------
-
-def _merge_overlay(template_path: str, overlay_buf: BytesIO) -> bytes:
-    overlay_buf.seek(0)
-    overlay_reader = PdfReader(overlay_buf)
-    template_reader = PdfReader(template_path)
-
-    writer = PdfWriter()
-    template_page = template_reader.pages[0]
-    overlay_page  = overlay_reader.pages[0]
-    template_page.merge_page(overlay_page)
-    writer.add_page(template_page)
-
-    out = BytesIO()
-    writer.write(out)
-    out.seek(0)
-    return out.read()
-
-
-# ---------------------------------------------------------------------------
-# United Fire PDF generator
-# ---------------------------------------------------------------------------
-
-def generate_united_pdf(form):
-    overlay_buf = BytesIO()
-    c = canvas.Canvas(overlay_buf, pagesize=(PAGE_W, PAGE_H))
-
-    for field, (x, y, sz) in UNITED_TEXT_FIELDS.items():
-        put_text(c, form.get(field, ""), x, y, sz)
-
-    atype = form.get("assembly_type", "")
-    if atype in UNITED_CHECKBOXES:
-        draw_x(c, *UNITED_CHECKBOXES[atype])
-
-    svc = form.get("system_service", "")
-    if svc in UNITED_CHECKBOXES:
-        draw_x(c, *UNITED_CHECKBOXES[svc])
-
-    bp = form.get("bypass", "")
-    if bp == "YES":  draw_x(c, *UNITED_CHECKBOXES["BYPASS_YES"])
-    elif bp == "NO": draw_x(c, *UNITED_CHECKBOXES["BYPASS_NO"])
-
-    cv1 = form.get("cv1_result", "")
-    if cv1 == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["CV1_CLOSED"])
-    elif cv1 == "Leaked":     draw_x(c, *UNITED_CHECKBOXES["CV1_LEAKED"])
-
-    cv2 = form.get("cv2_result", "")
-    if cv2 == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["CV2_CLOSED"])
-    elif cv2 == "Leaked":     draw_x(c, *UNITED_CHECKBOXES["CV2_LEAKED"])
-
-    rv = form.get("rv_result", "")
-    if rv == "Opened At":      draw_x(c, *UNITED_CHECKBOXES["RV_OPENED"])
-    elif rv == "Did Not Open": draw_x(c, *UNITED_CHECKBOXES["RV_DIDNOTOPEN"])
-
-    rvo = form.get("rv_out_result", "")
-    if rvo == "Closed":   draw_x(c, *UNITED_CHECKBOXES["RV_OUT_CLOSED"])
-    elif rvo == "Leaked": draw_x(c, *UNITED_CHECKBOXES["RV_OUT_LEAKED"])
-
-    rvi = form.get("rv_in_result", "")
-    if rvi == "Closed":   draw_x(c, *UNITED_CHECKBOXES["RV_IN_CLOSED"])
-    elif rvi == "Leaked": draw_x(c, *UNITED_CHECKBOXES["RV_IN_LEAKED"])
-
-    pvb_ai = form.get("pvb_ai_result", "")
-    if pvb_ai == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["PVB_AI_CLOSED"])
-    elif pvb_ai == "Opened At":  draw_x(c, *UNITED_CHECKBOXES["PVB_AI_OPENED"])
-
-    pvb_cv = form.get("pvb_cv_result", "")
-    if pvb_cv == "Leaked":    draw_x(c, *UNITED_CHECKBOXES["PVB_CV_LEAKED"])
-    elif pvb_cv == "Held At": draw_x(c, *UNITED_CHECKBOXES["PVB_CV_HELD"])
-
-    result = form.get("assembly_result", "")
-    if result == "PASSED":   draw_x(c, *UNITED_CHECKBOXES["PASSED"])
-    elif result == "FAILED": draw_x(c, *UNITED_CHECKBOXES["FAILED"])
-
-    rx, ry, rh, rmax, rw = UNITED_REPAIR_BOX
-    for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
-        put_text(c, ln, rx, ry - i * rh, 7)
-
-    sig_ir = get_signature_image_reader()
-    if sig_ir:
-        c.drawImage(sig_ir, UNITED_SIG_X, UNITED_SIG_Y,
-                    width=UNITED_SIG_W, height=UNITED_SIG_H, mask="auto")
-
-    c.save()
-    return _merge_overlay(TEMPLATE_UNITED, overlay_buf)
-
-
-def generate_jax_pdf(form):
-    overlay_buf = BytesIO()
-    c = canvas.Canvas(overlay_buf, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
-
-    for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
-        put_text(c, form.get(field, ""), x, y, sz)
-
-    ctp = form.get("comm_test_purpose", "")
-    for key, label in [("COMM_ANNUAL","Annual"),("COMM_REPAIR","Repair"),
-                       ("COMM_REPLACEMENT","Replacement"),("COMM_NEW_INSTALL","New Installation")]:
-        if ctp == label:
-            draw_x(c, *JAX_CHECKBOXES[key])
-
-    cst = form.get("comm_service_type", "")
-    for key, label in [("COMM_FIRE","Fire"),("COMM_IRRIGATION","Irrigation"),
-                       ("COMM_PROCESS","Process/Isolation"),("COMM_POTABLE","Potable"),
-                       ("COMM_FIRE_BYPASS","Fire bypass")]:
-        if cst == label:
-            draw_x(c, *JAX_CHECKBOXES[key])
-
-    rcl = form.get("comm_reclaim", "")
-    if rcl == "Yes":  draw_x(c, *JAX_CHECKBOXES["RECLAIM_YES"])
-    elif rcl == "No": draw_x(c, *JAX_CHECKBOXES["RECLAIM_NO"])
-
-    rtp = form.get("res_test_purpose", "")
-    for key, label in [("RES_ANNUAL","Annual"),("RES_REPAIR","Repair"),
-                       ("RES_REPLACEMENT","Replacement"),("RES_NEW_INSTALL","New Installation")]:
-        if rtp == label:
-            draw_x(c, *JAX_CHECKBOXES[key])
-
-    rst = form.get("res_service_type", "")
-    for key, label in [("RES_POTABLE","Potable"),("RES_IRRIGATION","Irrigation / Is reclaimed")]:
-        if rst == label:
-            draw_x(c, *JAX_CHECKBOXES[key])
-
-    res_rcl = form.get("res_reclaim", "")
-    if res_rcl == "Yes":  draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_YES"])
-    elif res_rcl == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
-
-    icv1 = form.get("init_cv1_result", "")
-    if icv1 == "Closed Tight":
-        draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
-
-    icv2 = form.get("init_cv2_result", "")
-    if icv2 == "Closed Tight":
-        draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
-
-    irv = form.get("init_rv_result", "")
-    if irv == "Opened At":      draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
-    elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
-
-    ipvb = form.get("init_pvb_result", "")
-    if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
-    elif ipvb == "Did not open":      draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
-
-    fcv1 = form.get("final_cv1_result", "")
-    if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
-
-    fcv2 = form.get("final_cv2_result", "")
-    if fcv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_CLOSED"])
-
-    frv = form.get("final_rv_result", "")
-    if frv == "Opened At": draw_x(c, *JAX_CHECKBOXES["FINAL_RV_OPENED"])
-
-    fpvb = form.get("final_pvb_result", "")
-    if fpvb == "Satisfactory": draw_x(c, *JAX_CHECKBOXES["FINAL_PVB_SAT"])
-
-    result = form.get("assembly_result", "")
-    if result == "PASSED":   draw_x(c, *JAX_CHECKBOXES["JAX_PASSED"])
-    elif result == "FAILED": draw_x(c, *JAX_CHECKBOXES["JAX_FAILED"])
-
-    sig_ir = get_signature_image_reader()
-    if sig_ir:
-        c.drawImage(sig_ir, JAX_SIG_X, JAX_SIG_Y,
-                    width=JAX_SIG_W, height=JAX_SIG_H, mask="auto")
-
-    c.save()
-    return _merge_overlay(TEMPLATE_JAX, overlay_buf)
-
-
-# ---------------------------------------------------------------------------
-# Delivery
-# ---------------------------------------------------------------------------
-
-def safe_filename(customer, street, location, prefix=""):
-    def clean(s): return re.sub(r"[^\w\s\-]", "", s or "").strip()
-    parts = [clean(customer) or "Customer",
-             clean(street)   or "Address",
-             clean(location) or "Location"]
-    name = " - ".join(parts) + ".pdf"
-    return (prefix + " " + name).strip() if prefix else name
-
-
-def deliver_pdf(pdf_bytes: bytes, filename: str):
-    st.download_button(
-        label="📥 Download PDF",
-        data=pdf_bytes,
-        file_name=filename,
-        mime="application/pdf",
-        use_container_width=True,
-        key=f"pdf_dl_{filename}_{len(st.session_state.get('job_folder', []))}",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Auto-save helper (used by JAX form)
-# ---------------------------------------------------------------------------
-
-def _sync(form, key, widget_key):
-    form[key] = st.session_state.get(widget_key, "")
-
-
-def text_input_autosave(label, form, key, widget_key, **kwargs):
-    """text_input that auto-saves to form[key] on every change."""
-    return st.text_input(
-        label,
-        value=form.get(key, ""),
-        key=widget_key,
-        on_change=_sync,
-        args=(form, key, widget_key),
-        **kwargs,
-    )
-
-
-def _radio(label, options, key, form, **kwargs):
-    opts = [""] + list(options)
-    current = form.get(key, "")
-    idx = opts.index(current) if current in opts else 0
-
-    def _sync_radio(_form=form, _key=key):
-        _form[_key] = st.session_state.get(_key, "")
-
-    chosen = st.radio(label, opts, index=idx, key=key,
-                      format_func=lambda x: "—" if x == "" else x,
-                      on_change=_sync_radio, **kwargs)
-    form[key] = chosen
-    return chosen
-
-
-# ===========================================================================
-# Technician selector sidebar widget
-# ===========================================================================
-
-def render_technician_sidebar():
-    """Sidebar: technician selector + profile editor."""
-    _init_technicians()
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("👷 Technician")
-
-    names = get_technician_names()
-    current = st.session_state.get("active_technician", "")
-    idx = names.index(current) if current in names else 0
-
-    selected = st.sidebar.selectbox(
-        "Select technician",
-        names,
-        index=idx,
-        format_func=lambda x: "— select —" if x == "" else x,
-        key="tech_selector",
-    )
-
-    if selected and selected != st.session_state.get("active_technician", ""):
-        profile = get_technician_profile(selected)
-        st.session_state["active_technician"] = selected
-        st.session_state["signature_b64"] = profile.get("signature_b64", "")
-        st.session_state["tester_defaults"] = {
-            k: profile.get(k, "") for k in
-            ["technician", "cert_no", "recert", "gauge_mfg", "gauge_serial", "date_cal"]
-        }
-        st.rerun()
-
-    if not selected:
-        st.sidebar.caption("Select your name to load your profile.")
-        return
-
-    with st.sidebar.expander("✏️ Edit My Profile", expanded=False):
-        profile = get_technician_profile(selected)
-
-        new_name   = st.text_input("Display name",        value=profile.get("technician",  selected), key="pe_name")
-        new_cert   = st.text_input("Certification No.",   value=profile.get("cert_no",     ""),       key="pe_cert")
-        new_recert = st.text_input("Re-Cert Due Date",    value=profile.get("recert",      ""),       key="pe_recert")
-        new_gmfg   = st.text_input("Gauge Manufacturer",  value=profile.get("gauge_mfg",   ""),       key="pe_gmfg")
-        new_gsn    = st.text_input("Gauge Serial #",      value=profile.get("gauge_serial", ""),      key="pe_gsn")
-        new_gcal   = st.text_input("Date Calibrated",     value=profile.get("date_cal",    ""),       key="pe_gcal")
-
-        st.markdown("**Signature**")
-        if st.session_state.get("signature_b64"):
-            st.success("Signature on file ✓")
-            if st.button("🗑️ Clear signature", key="pe_clrsig"):
-                clear_signature()
-                st.rerun()
-        else:
-            try:
-                from streamlit_drawable_canvas import st_canvas
-                sig_canvas = st_canvas(
-                    fill_color="rgba(255,255,255,0)",
-                    stroke_width=2,
-                    stroke_color="#cc0000",
-                    background_color="#ffffff",
-                    height=80, width=220,
-                    drawing_mode="freedraw",
-                    key="pe_sig_canvas",
-                )
-                if st.button("💾 Save signature", key="pe_savesig"):
-                    if sig_canvas.image_data is not None and sig_canvas.image_data.max() > 0:
-                        b64 = save_signature(sig_canvas.image_data)
-                        st.session_state["signature_b64"] = b64
-                    else:
-                        st.warning("Draw your signature first.")
-            except ImportError:
-                st.warning("`streamlit-drawable-canvas` not installed.")
-
-        if st.button("💾 Save Profile to Server", key="pe_save", use_container_width=True):
-            updated_profile = {
-                "technician":    new_name,
-                "cert_no":       new_cert,
-                "recert":        new_recert,
-                "gauge_mfg":     new_gmfg,
-                "gauge_serial":  new_gsn,
-                "date_cal":      new_gcal,
-                "signature_b64": st.session_state.get("signature_b64", ""),
-            }
-            techs = st.session_state["technicians"]
-            if new_name != selected and new_name.strip():
-                techs.pop(selected, None)
-                key_name = new_name
-            else:
-                key_name = selected
-            techs[key_name] = updated_profile
-            ok, msg = save_technicians_to_github(
-                techs, st.session_state.get("technicians_sha")
-            )
-            if ok:
-                st.success(msg)
-                st.session_state["active_technician"] = key_name
-                _, new_sha = load_technicians_from_github()
-                st.session_state["technicians_sha"] = new_sha
-            else:
-                st.error(msg)
-
-    with st.sidebar.expander("➕ Add New Technician", expanded=False):
-        new_tech_name = st.text_input("Full name", key="new_tech_name")
-        if st.button("Add", key="new_tech_add"):
-            name = new_tech_name.strip()
-            if name and name not in st.session_state["technicians"]:
-                blank = {
-                    "technician": name, "cert_no": "", "recert": "",
-                    "gauge_mfg": "", "gauge_serial": "", "date_cal": "",
-                    "signature_b64": "",
-                }
-                st.session_state["technicians"][name] = blank
-                ok, msg = save_technicians_to_github(
-                    st.session_state["technicians"],
-                    st.session_state.get("technicians_sha")
-                )
-                if ok:
-                    st.success(f"Added {name}")
-                    _, new_sha = load_technicians_from_github()
-                    st.session_state["technicians_sha"] = new_sha
-                    st.rerun()
-                else:
-                    st.error(msg)
-            elif name in st.session_state["technicians"]:
-                st.warning("That name already exists.")
-            else:
-                st.warning("Enter a name first.")
-
-
-# ===========================================================================
-# App layout
-# ===========================================================================
-
-st.set_page_config(page_title="Backflow Report", page_icon="🔧", layout="wide")
-_init_job_folder()
-_init_technicians()
-
-render_technician_sidebar()
-render_job_folder_sidebar()
-
-st.title("🔧 Backflow Preventer Test Report")
-
-# ---------------------------------------------------------------------------
-# Tester defaults helper
-# ---------------------------------------------------------------------------
-TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
-
-def get_tester_defaults():
-    active = st.session_state.get("active_technician", "")
-    if active:
-        profile = get_technician_profile(active)
-        return {k: profile.get(k, "") for k in TESTER_KEYS}
-    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
-
-def save_tester_defaults(form):
-    st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
-
-# ---------------------------------------------------------------------------
-# Form selector
-# ---------------------------------------------------------------------------
-form_choice = st.radio(
-    "Select Form",
-    ["United Fire (Standard)", "Jacksonville / JEA"],
-    horizontal=True,
-    key="form_choice",
-)
-st.divider()
-
-# ---------------------------------------------------------------------------
-# United Fire form
-# ---------------------------------------------------------------------------
-if form_choice == "United Fire (Standard)":
-
-    if "united_form" not in st.session_state:
-        defs = get_tester_defaults()
-        f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
-        f0["date"]      = date.today().strftime("%m/%d/%Y")
-        f0["test_date"] = date.today().strftime("%m/%d/%Y")
-        st.session_state.united_form = f0
-
-    f = st.session_state.united_form
-
-    # Inject active tech profile if just selected
-    active = st.session_state.get("active_technician", "")
-    if active:
-        profile = get_technician_profile(active)
-        for k in TESTER_KEYS:
-            if not f.get(k) and profile.get(k):
-                f[k] = profile[k]
-
-    st.divider()
-    st.subheader("📋 Job Information")
-    r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
-    with r1c1:
-        tap_clear_input("Date",   "united_form", "date",   "u_date")
-    with r1c2:
-        tap_clear_input("Branch", "united_form", "branch", "u_branch")
-    with r1c3:
-        tap_clear_input("Authority Having Jurisdiction", "united_form", "ahj", "u_ahj")
-    tap_clear_input("Customer / Site Name",  "united_form", "customer_name",  "u_cust")
-    tap_clear_input("Street Address",         "united_form", "street_address", "u_addr")
-
-    # Location of Assembly — GREEN: plain clearable (no tap-to-clear needed, always wiped after PDF)
-    clearable_input("Location of Assembly",   "united_form", "location",       "u_loc")
-
-    st.divider()
-    st.subheader("🔩 Backflow Assembly")
-
-    # Serial Number — BLUE: tap-to-clear + Unable to Read option
-    sn_col, sn_btn_col = st.columns([5, 1])
-    with sn_col:
-        sn_focus_flag = "u_sn_focused"
-        if st.session_state.get("u_sn_do_clear"):
-            f["serial_number"] = ""
-            st.session_state.pop("u_sn_do_clear", None)
-            st.session_state.pop("u_sn", None)
-        def _on_change_sn():
-            if not st.session_state.get(sn_focus_flag):
-                st.session_state["u_sn_do_clear"] = True
-                st.session_state[sn_focus_flag] = True
-        st.text_input(
-            "Serial Number",
-            value=f.get("serial_number", ""),
-            key="u_sn",
-            on_change=_on_change_sn,
-        )
-        f["serial_number"] = st.session_state.get("u_sn", "")
-    with sn_btn_col:
-        st.write("")
-        if st.button("✕", key="clr_u_sn", help="Clear Serial Number"):
-            f["serial_number"] = ""
-            st.session_state.pop("u_sn", None)
-            st.session_state.pop(sn_focus_flag, None)
-            st.rerun()
-
-    unable_to_read = st.checkbox(
-        "Unable to Read serial number",
-        value=(f.get("serial_number") == "Unable to Read"),
-        key="u_sn_unable",
-    )
-    if unable_to_read:
-        f["serial_number"] = "Unable to Read"
-        st.session_state["u_sn"] = "Unable to Read"
-
-    c2, c3, c4 = st.columns(3)
-    with c2:
-        tap_clear_input("Manufacturer ↺", "united_form", "manufacturer",  "u_mfg")
-    with c3:
-        tap_clear_input("Model ↺",         "united_form", "model",         "u_mdl")
-    with c4:
-        tap_clear_input("Size ↺",           "united_form", "size",          "u_sz")
-
-    c1, c2, c3 = st.columns(3)
-    asm_opts = ["", "RP", "DC", "PVB", "SVB"]
-    f["assembly_type"] = c1.selectbox("Type of Assembly ↺", asm_opts,
-        index=asm_opts.index(f.get("assembly_type","")) if f.get("assembly_type","") in asm_opts else 0,
-        key="u_atype")
-    ss_opts = ["", "FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]
-    f["system_service"] = c2.selectbox("System Service ↺", ss_opts,
-        index=ss_opts.index(f.get("system_service","")) if f.get("system_service","") in ss_opts else 0,
-        key="u_ss")
-    bp_opts = ["", "YES", "NO"]
-    f["bypass"] = c3.selectbox("Bypass", bp_opts,
-        index=bp_opts.index(f.get("bypass","")) if f.get("bypass","") in bp_opts else 0,
-        key="u_bp")
-
-    st.divider()
-    st.subheader("🧪 Test Results")
-
-    show_rp  = f.get("assembly_type") in ("", "RP", "DC")
-    show_pvb = f.get("assembly_type") in ("", "PVB", "SVB")
-
-    if show_rp:
-        st.markdown("**Check Valves**")
-        cv_c1, cv_c2 = st.columns(2)
-        with cv_c1:
-            st.markdown("*CV #1*")
-            _radio("CV #1 Result", ["Closed Tight","Leaked"], "cv1_result", f, horizontal=True)
-            clearable_input("CV #1 Differential Pressure (psi)", "united_form", "cv1_dp", "u_cv1dp")
-        with cv_c2:
-            st.markdown("*CV #2*")
-            _radio("CV #2 Result", ["Closed Tight","Leaked"], "cv2_result", f, horizontal=True)
-            clearable_input("CV #2 Differential Pressure (psi)", "united_form", "cv2_dp", "u_cv2dp")
-
-        st.markdown("**Relief Valve**")
-        rv_c1, rv_c2, rv_c3 = st.columns(3)
-        with rv_c1:
-            _radio("RV Result", ["Opened At","Did Not Open"], "rv_result", f, horizontal=True)
-            clearable_input("RV Opened At (psi)", "united_form", "rv_psi", "u_rvpsi")
-        with rv_c2:
-            _radio("RV Outlet", ["Closed","Leaked"], "rv_out_result", f, horizontal=True)
-        with rv_c3:
-            _radio("RV Inlet", ["Closed","Leaked"], "rv_in_result", f, horizontal=True)
-
-    if show_pvb:
-        st.markdown("**PVB**")
-        pvb_c1, pvb_c2 = st.columns(2)
-        with pvb_c1:
-            _radio("Air Inlet", ["Closed Tight","Opened At"], "pvb_ai_result", f, horizontal=True)
-            clearable_input("Air Inlet Opened At (psi)", "united_form", "pvb_ai_psi", "u_aipsi")
-        with pvb_c2:
-            _radio("Check Valve", ["Leaked","Held At"], "pvb_cv_result", f, horizontal=True)
-            clearable_input("CV Held/Leaked At (psi)", "united_form", "pvb_cv_psi", "u_cvpsi")
-
-    st.divider()
-    clearable_input("Test Date", "united_form", "test_date", "u_tdate")
-
-    res_opts = ["", "PASSED", "FAILED"]
-    f["assembly_result"] = st.radio("Pass / Fail", res_opts,
-        index=res_opts.index(f.get("assembly_result","")) if f.get("assembly_result","") in res_opts else 0,
-        horizontal=True, format_func=lambda x: "—" if x=="" else x, key="u_res")
-
-    st.divider()
-    st.subheader("🔧 Repairs / Comments")
-    f["repair_desc"] = st.text_area("Repair description", f.get("repair_desc",""), height=80, key="u_rep")
-
-    st.divider()
-
-    with st.expander("🧰 Tester Info", expanded=False):
-        st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
-        t1, t2, t3 = st.columns(3)
-        with t1:
-            clearable_input("Gauge Manufacturer", "united_form", "gauge_mfg",    "u_gmfg")
-        with t2:
-            clearable_input("Gauge Serial #",     "united_form", "gauge_serial", "u_gsn")
-        with t3:
-            clearable_input("Date Calibrated",    "united_form", "date_cal",     "u_cal")
-        t1b, t2b, t3b = st.columns(3)
-        with t1b:
-            clearable_input("Technician",        "united_form", "technician", "u_tech")
-        with t2b:
-            clearable_input("Certification No.", "united_form", "cert_no",    "u_cert")
-        with t3b:
-            clearable_input("Re-Cert Due Date",  "united_form", "recert",     "u_recert")
-
-    st.divider()
-
-    if st.button("📄 Generate PDF", type="primary", use_container_width=True, key="u_gen"):
-        with st.spinner("Building PDF..."):
-            try:
-                save_tester_defaults(f)
-                pdf_bytes = generate_united_pdf(f)
-                fname = safe_filename(f.get("customer_name",""), f.get("street_address",""), f.get("location",""))
-                add_to_job_folder(pdf_bytes, fname)
-                deliver_pdf(pdf_bytes, fname)
-                st.success(f"✅ PDF ready: {fname}  |  Added to Job Folder ({len(st.session_state.job_folder)} total)")
-
-                # Clear GREEN fields immediately after PDF generation
-                for green_key in UNITED_GREEN:
-                    f[green_key] = ""
-                # Reset radio widgets for green fields
-                for radio_key in ["cv1_result","cv2_result","rv_result","rv_out_result",
-                                  "rv_in_result","pvb_ai_result","pvb_cv_result","assembly_result"]:
-                    st.session_state.pop(radio_key, None)
-                # Reset green text widget keys
-                for wk in ["u_cv1dp","u_cv2dp","u_rvpsi","u_aipsi","u_cvpsi","u_tdate","u_loc","u_rep"]:
-                    st.session_state.pop(wk, None)
-                # Reset blue tap-to-clear focus flags so fields clear on next tap
-                reset_blue_focus_flags()
-
-                st.session_state["u_show_next_action"] = True
-            except Exception as e:
-                st.error(f"Error generating PDF: {e}")
-
-    # Post-PDF action prompt
-    if st.session_state.get("u_show_next_action"):
-        st.divider()
-        st.markdown("**What would you like to do next?**")
-        na1, na2, na3 = st.columns(3)
-        with na1:
-            if st.button("➡️ Next Report (same job)", use_container_width=True, key="u_next_post"):
-                # Keep YELLOW + BLUE, wipe GREEN (already wiped above), reset dates
-                kept = {k: f.get(k, "") for k in UNITED_NEXT_REPORT_KEEP}
-                kept["date"]      = date.today().strftime("%m/%d/%Y")
-                kept["test_date"] = date.today().strftime("%m/%d/%Y")
-                save_tester_defaults(f)
-                st.session_state.united_form = kept
-                reset_blue_focus_flags()
-                st.session_state["u_show_next_action"] = False
-                st.rerun()
-        with na2:
-            if st.button("🏢 New Job", use_container_width=True, key="u_newjob_post"):
-                # Keep YELLOW only
-                save_tester_defaults(f)
-                defs = get_tester_defaults()
-                f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
-                f0["date"]      = date.today().strftime("%m/%d/%Y")
-                f0["test_date"] = date.today().strftime("%m/%d/%Y")
-                st.session_state.united_form = f0
-                st.session_state.job_folder = []
-                reset_blue_focus_flags()
-                st.session_state["u_show_next_action"] = False
-                st.rerun()
-        with na3:
-            if st.button("✋ Stay on this form", use_container_width=True, key="u_stay_post"):
-                st.session_state["u_show_next_action"] = False
-                st.rerun()
-
-# ===========================================================================
-# Jacksonville / JEA form
-# ===========================================================================
-else:
-
-    if "jax_form" not in st.session_state:
-        st.session_state.jax_form = {
-            "init_test_date":  date.today().strftime("%m/%d/%Y"),
-            "final_test_date": date.today().strftime("%m/%d/%Y"),
-        }
-
-    f = st.session_state.jax_form
-
-    active = st.session_state.get("active_technician", "")
-    if active:
-        profile = get_technician_profile(active)
-        jax_tech_map = {
-            "init_tester_name": "technician",
-            "init_cert":        "cert_no",
-            "final_tester_name": "technician",
-            "final_cert":        "cert_no",
-        }
-        for form_key, profile_key in jax_tech_map.items():
-            if not f.get(form_key) and profile.get(profile_key):
-                f[form_key] = profile[profile_key]
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("➡️ Next Report (same job)", key="j_next"):
-            kept = {k: f.get(k, "") for k in JAX_NEXT_REPORT_KEEP}
-            kept["init_test_date"]  = date.today().strftime("%m/%d/%Y")
-            kept["final_test_date"] = date.today().strftime("%m/%d/%Y")
-            st.session_state.jax_form = kept
-            st.rerun()
-    with col2:
-        if st.button("🏢 New Job", key="j_newjob"):
-            kept = {k: f.get(k, "") for k in JAX_NEW_JOB_KEEP}
-            kept["init_test_date"]  = date.today().strftime("%m/%d/%Y")
-            kept["final_test_date"] = date.today().strftime("%m/%d/%Y")
-            st.session_state.jax_form = kept
-            st.session_state.job_folder = []
-            st.rerun()
-    with col3:
-        if st.button("🗑️ Clear Form", key="j_clear"):
-            st.session_state.jax_form = {
-                "init_test_date":  date.today().strftime("%m/%d/%Y"),
-                "final_test_date": date.today().strftime("%m/%d/%Y"),
-            }
-            st.rerun()
-
-    st.divider()
-
-    st.subheader("📋 Property & Contact Information")
-    c1, c2 = st.columns(2)
-    with c1:
-        text_input_autosave("Name of premises (company / person)", f, "premises_name",    "j_prem")
-    with c2:
-        text_input_autosave("Owner or agent's name",               f, "owner_name",       "j_own")
-    with c1:
-        text_input_autosave("Service address",                      f, "service_address",  "j_sa")
-    with c2:
-        text_input_autosave("Mailing address",                      f, "mailing_address",  "j_ma")
-    with c1:
-        text_input_autosave("Physical location of device",          f, "physical_location","j_pl")
-    with c2:
-        text_input_autosave("Contact phone number",                 f, "contact_phone",    "j_ph")
-    with c1:
-        text_input_autosave("JEA account number",                   f, "jea_account",      "j_acct")
-    with c2:
-        text_input_autosave("Meter number",                         f, "meter_number",     "j_meter")
-
-    st.divider()
-
-    st.subheader("📝 Test Purpose & Service Type")
-    tp_opts_comm = ["", "Annual", "Repair", "Replacement", "New Installation"]
-    st_opts_comm = ["", "Fire", "Irrigation", "Process/Isolation", "Potable", "Fire bypass"]
-    rc_opts      = ["", "Yes", "No"]
-    tp_opts_res  = ["", "Annual", "Repair", "Replacement", "New Installation"]
-    st_opts_res  = ["", "Potable", "Irrigation / Is reclaimed"]
-
-    cc1, cc2, cc3 = st.columns(3)
-    f["comm_test_purpose"] = cc1.selectbox("Commercial test purpose", tp_opts_comm,
-        index=tp_opts_comm.index(f.get("comm_test_purpose","")) if f.get("comm_test_purpose","") in tp_opts_comm else 0, key="j_ctp")
-    f["comm_service_type"] = cc2.selectbox("Commercial service type", st_opts_comm,
-        index=st_opts_comm.index(f.get("comm_service_type","")) if f.get("comm_service_type","") in st_opts_comm else 0, key="j_cst")
-    f["comm_reclaim"] = cc3.selectbox("Reclaimed water? (Commercial)", rc_opts,
-        index=rc_opts.index(f.get("comm_reclaim","")) if f.get("comm_reclaim","") in rc_opts else 0, key="j_crc")
-
-    rc1, rc2, rc3 = st.columns(3)
-    f["res_test_purpose"] = rc1.selectbox("Residential test purpose", tp_opts_res,
-        index=tp_opts_res.index(f.get("res_test_purpose","")) if f.get("res_test_purpose","") in tp_opts_res else 0, key="j_rtp")
-    f["res_service_type"] = rc2.selectbox("Residential service type", st_opts_res,
-        index=st_opts_res.index(f.get("res_service_type","")) if f.get("res_service_type","") in st_opts_res else 0, key="j_rst")
-    f["res_reclaim"] = rc3.selectbox("Reclaimed water? (Residential)", rc_opts,
-        index=rc_opts.index(f.get("res_reclaim","")) if f.get("res_reclaim","") in rc_opts else 0, key="j_rrc")
-
-    st.divider()
-
-    st.subheader("🔩 Device Information")
-    d1, d2, d3, d4, d5, d6 = st.columns(6)
-    with d1:
-        text_input_autosave("Device type",       f, "device_type",   "j_dt")
-    with d2:
-        text_input_autosave("Manufacturer",      f, "manufacturer",  "j_mfg")
-    with d3:
-        text_input_autosave("Size",              f, "size",          "j_sz")
-    with d4:
-        text_input_autosave("Model Number",      f, "model_number",  "j_mn")
-    with d5:
-        text_input_autosave("Serial Number",     f, "serial_number", "j_sn")
-    with d6:
-        text_input_autosave("Installation Date", f, "install_date",  "j_id")
-
-    st.divider()
-
-    st.subheader("🧪 Initial Test")
-    it1, it2, it3, it4 = st.columns(4)
-
-    with it1:
-        st.markdown("**Check Valve #1**")
-        _radio("Result", ["Closed Tight"], "init_cv1_result", f, horizontal=True)
-        text_input_autosave("at ___ psi", f, "init_cv1_psi", "j_icv1p")
-
-    with it2:
-        st.markdown("**Check Valve #2**")
-        _radio("Result", ["Closed Tight"], "init_cv2_result", f, horizontal=True)
-        text_input_autosave("at ___ psi", f, "init_cv2_psi", "j_icv2p")
-
-    with it3:
-        st.markdown("**DP RV Initial: Opened at**")
-        _radio("Result", ["Opened At","Did Not Open"], "init_rv_result", f, horizontal=True)
-        text_input_autosave("lbs reduced pressure", f, "init_rv_psi", "j_irvp")
-
-    with it4:
-        st.markdown("**Air Inlet Opened At**")
-        _radio("Result", ["Air inlet opened at","Did not open"], "init_pvb_result", f, horizontal=True)
-        text_input_autosave("psi", f, "init_pvb_psi", "j_ipvbp")
-
-    text_input_autosave("Initial Test Date", f, "init_test_date", "j_itd")
-
-    st.divider()
-
-    with st.expander("✅ Final Test (hidden by default)", expanded=False):
-        ft1, ft2, ft3, ft4 = st.columns(4)
-
-        with ft1:
-            st.markdown("**Check Valve #1**")
-            _radio("Result", ["Closed Tight"], "final_cv1_result", f, horizontal=True)
-            text_input_autosave("at ___ psi", f, "final_cv1_psi", "j_fcv1p")
-
-        with ft2:
-            st.markdown("**Check Valve #2**")
-            _radio("Result", ["Closed Tight"], "final_cv2_result", f, horizontal=True)
-            text_input_autosave("at ___ psi", f, "final_cv2_psi", "j_fcv2p")
-
-        with ft3:
-            st.markdown("**Relief Valve**")
-            _radio("Result", ["Opened At"], "final_rv_result", f, horizontal=True)
-            text_input_autosave("lbs reduced pressure", f, "final_rv_psi", "j_frvp")
-
-        with ft4:
-            st.markdown("**PVB**")
-            _radio("Result", ["Satisfactory"], "final_pvb_result", f, horizontal=True)
-
-        text_input_autosave("Final Test Date", f, "final_test_date", "j_ftd")
-
-    res_opts = ["", "PASSED", "FAILED"]
-    f["assembly_result"] = st.radio("Pass / Fail Certification", res_opts,
-        index=res_opts.index(f.get("assembly_result","")) if f.get("assembly_result","") in res_opts else 0,
-        horizontal=True, format_func=lambda x: "—" if x=="" else x, key="j_ares")
-
-    st.divider()
-
-    st.subheader("🔧 Repairs / Unusual Conditions")
-    f["repairs"] = st.text_area("Repairs/unusual conditions", f.get("repairs",""), height=80, key="j_rep")
-
-    st.divider()
-
-    with st.expander("🖊️ Tester Information", expanded=False):
-        st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
-        ti1, ti2, ti3, ti4 = st.columns(4)
-        with ti1:
-            text_input_autosave("Initial tester name ↺", f, "init_tester_name", "j_itn")
-        with ti2:
-            text_input_autosave("Company ↺",              f, "init_company",     "j_ico")
-        with ti3:
-            text_input_autosave("Cert # ↺",               f, "init_cert",        "j_ic")
-        with ti4:
-            text_input_autosave("Test date",              f, "init_test_date",   "j_itd2")
-
-        ri1, ri2, ri3, ri4 = st.columns(4)
-        with ri1:
-            text_input_autosave("Repaired by",     f, "repaired_by",    "j_rb")
-        with ri2:
-            text_input_autosave("Repair company",  f, "repair_company", "j_rco")
-        with ri3:
-            text_input_autosave("Repair cert #",   f, "repair_cert",    "j_rc")
-        with ri4:
-            text_input_autosave("Repair date",     f, "repair_date",    "j_rd")
-
-        fi1, fi2, fi3, fi4 = st.columns(4)
-        with fi1:
-            text_input_autosave("Final tester name ↺", f, "final_tester_name", "j_ftn")
-        with fi2:
-            text_input_autosave("Company ↺",             f, "final_company",     "j_fco")
-        with fi3:
-            text_input_autosave("Cert # ↺",              f, "final_cert",        "j_fc")
-        with fi4:
-            text_input_autosave("Test date",             f, "final_test_date",   "j_ftd2")
-        text_input_autosave("Signature date",        f, "signature_date",    "j_sd")
-
-    st.divider()
-
-    if st.button("📄 Generate Jacksonville PDF", type="primary", use_container_width=True, key="j_gen"):
-        with st.spinner("Building PDF..."):
-            try:
-                pdf_bytes = generate_jax_pdf(f)
-                fname = safe_filename(
-                    f.get("premises_name",""),
-                    f.get("service_address",""),
-                    f.get("physical_location",""),
-                    prefix="JAX",
-                )
-                add_to_job_folder(pdf_bytes, fname)
-                deliver_pdf(pdf_bytes, fname)
-                st.success(f"✅ PDF ready: {fname}  |  Added to Job Folder ({len(st.session_state.job_folder)} total)")
-            except Exception as e:
-                st.error(f"Error generating PDF: {e}")
+        
