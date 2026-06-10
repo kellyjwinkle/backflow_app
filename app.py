@@ -1051,6 +1051,28 @@ def _radio(label, options, key, form, **kwargs):
     return chosen
 
 
+# ---------------------------------------------------------------------------
+# Tester defaults helper  ← MOVED HERE so render_technician_sidebar can use them
+# ---------------------------------------------------------------------------
+TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
+
+def _clear_tester_widget_state():
+    """Remove stale widget cache for tester fields so inputs re-render with fresh values."""
+    tester_widget_keys = ["u_gmfg", "u_gsn", "u_gcal", "u_tech", "u_cert", "u_recert"]
+    for wk in tester_widget_keys:
+        st.session_state.pop(wk, None)
+
+def get_tester_defaults():
+    active = st.session_state.get("active_technician", "")
+    if active:
+        profile = get_technician_profile(active)
+        return {k: profile.get(k, "") for k in TESTER_KEYS}
+    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
+
+def save_tester_defaults(form):
+    st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
+
+
 # ===========================================================================
 # Technician selector sidebar widget
 # ===========================================================================
@@ -1200,27 +1222,6 @@ render_technician_sidebar()
 render_job_folder_sidebar()
 
 st.title("🔧 Backflow Preventer Test Report")
-
-# ---------------------------------------------------------------------------
-# Tester defaults helper
-# ---------------------------------------------------------------------------
-TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
-
-def _clear_tester_widget_state():
-    """Remove stale widget cache for tester fields so inputs re-render with fresh values."""
-    tester_widget_keys = ["u_gmfg", "u_gsn", "u_gcal", "u_tech", "u_cert", "u_recert"]
-    for wk in tester_widget_keys:
-        st.session_state.pop(wk, None)
-
-def get_tester_defaults():
-    active = st.session_state.get("active_technician", "")
-    if active:
-        profile = get_technician_profile(active)
-        return {k: profile.get(k, "") for k in TESTER_KEYS}
-    return st.session_state.get("tester_defaults", {k: "" for k in TESTER_KEYS})
-
-def save_tester_defaults(form):
-    st.session_state["tester_defaults"] = {k: form.get(k, "") for k in TESTER_KEYS}
 
 # ---------------------------------------------------------------------------
 # Form selector
