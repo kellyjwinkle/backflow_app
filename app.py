@@ -78,7 +78,6 @@ def save_technicians_to_github(techs: dict, current_sha: str | None):
     """Commit updated technicians.json back to the GitHub repo."""
     token = _github_token()
     if not token:
-        # No token — save locally only (won't survive reboot but better than nothing)
         with open(TECHNICIANS_FILE, "w") as fh:
             json.dump(techs, fh, indent=2)
         return False, "No GITHUB_TOKEN secret configured — saved locally only."
@@ -128,7 +127,6 @@ def upsert_technician_profile(name: str, profile: dict):
         st.session_state["technicians"],
         st.session_state.get("technicians_sha")
     )
-    # Refresh SHA after successful save
     if ok:
         _, new_sha = load_technicians_from_github()
         st.session_state["technicians_sha"] = new_sha
@@ -312,6 +310,32 @@ def wrap_text(text, w=58):
     if line:
         lines.append(line)
     return lines
+
+
+# ---------------------------------------------------------------------------
+# Clearable text input helper (United Fire only)
+# ---------------------------------------------------------------------------
+
+def clearable_input(label, form, key, widget_key, **kwargs):
+    """Text input with an inline Clear button. Updates form[key] on change or clear."""
+    col_input, col_btn = st.columns([5, 1])
+    with col_input:
+        def _sync():
+            form[key] = st.session_state.get(widget_key, "")
+        val = st.text_input(
+            label,
+            value=form.get(key, ""),
+            key=widget_key,
+            on_change=_sync,
+            **kwargs,
+        )
+    with col_btn:
+        st.write("")  # vertical alignment spacer
+        if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
+            form[key] = ""
+            st.session_state[widget_key] = ""
+            st.rerun()
+    return val
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +638,7 @@ def deliver_pdf(pdf_bytes: bytes, filename: str):
 
 
 # ---------------------------------------------------------------------------
-# Auto-save helper
+# Auto-save helper (used by JAX form)
 # ---------------------------------------------------------------------------
 
 def _sync(form, key, widget_key):
@@ -671,11 +695,9 @@ def render_technician_sidebar():
     )
 
     if selected and selected != st.session_state.get("active_technician", ""):
-        # Load this tech's profile into session
         profile = get_technician_profile(selected)
         st.session_state["active_technician"] = selected
         st.session_state["signature_b64"] = profile.get("signature_b64", "")
-        # Inject tester defaults so both forms pick them up
         st.session_state["tester_defaults"] = {
             k: profile.get(k, "") for k in
             ["technician", "cert_no", "recert", "gauge_mfg", "gauge_serial", "date_cal"]
@@ -686,7 +708,6 @@ def render_technician_sidebar():
         st.sidebar.caption("Select your name to load your profile.")
         return
 
-    # ── Profile editor ──────────────────────────────────────────────────────
     with st.sidebar.expander("✏️ Edit My Profile", expanded=False):
         profile = get_technician_profile(selected)
 
@@ -734,7 +755,6 @@ def render_technician_sidebar():
                 "date_cal":      new_gcal,
                 "signature_b64": st.session_state.get("signature_b64", ""),
             }
-            # If name changed, update the key in the dict
             techs = st.session_state["technicians"]
             if new_name != selected and new_name.strip():
                 techs.pop(selected, None)
@@ -748,13 +768,11 @@ def render_technician_sidebar():
             if ok:
                 st.success(msg)
                 st.session_state["active_technician"] = key_name
-                # Refresh SHA
                 _, new_sha = load_technicians_from_github()
                 st.session_state["technicians_sha"] = new_sha
             else:
                 st.error(msg)
 
-    # ── Add new technician ───────────────────────────────────────────────────
     with st.sidebar.expander("➕ Add New Technician", expanded=False):
         new_tech_name = st.text_input("Full name", key="new_tech_name")
         if st.button("Add", key="new_tech_add"):
@@ -797,7 +815,7 @@ render_job_folder_sidebar()
 st.title("🔧 Backflow Preventer Test Report")
 
 # ---------------------------------------------------------------------------
-# Tester defaults helper (pulls from active tech profile)
+# Tester defaults helper
 # ---------------------------------------------------------------------------
 TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
 
@@ -844,59 +862,56 @@ if form_choice == "United Fire (Standard)":
             if not f.get(k) and profile.get(k):
                 f[k] = profile[k]
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("➡️ Next Report (same job)"):
-            kept = {k: f.get(k, "") for k in UNITED_NEXT_REPORT_KEEP}
-            kept["date"]      = date.today().strftime("%m/%d/%Y")
-            kept["test_date"] = date.today().strftime("%m/%d/%Y")
-            save_tester_defaults(f)
-            st.session_state.united_form = kept
-            st.rerun()
-    with col2:
-        if st.button("🏢 New Job"):
-            save_tester_defaults(f)
-            defs = get_tester_defaults()
-            f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
-            f0["date"]      = date.today().strftime("%m/%d/%Y")
-            f0["test_date"] = date.today().strftime("%m/%d/%Y")
-            st.session_state.united_form = f0
-            st.session_state.job_folder = []
-            st.rerun()
-    with col3:
-        if st.button("🗑️ Clear Form"):
-            save_tester_defaults(f)
-            defs = get_tester_defaults()
-            f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
-            f0["date"]      = date.today().strftime("%m/%d/%Y")
-            f0["test_date"] = date.today().strftime("%m/%d/%Y")
-            st.session_state.united_form = f0
-            st.rerun()
-
     st.divider()
     st.subheader("📋 Job Information")
     r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
     with r1c1:
-        text_input_autosave("Date",   f, "date",   "u_date")
+        clearable_input("Date",   f, "date",   "u_date")
     with r1c2:
-        text_input_autosave("Branch", f, "branch", "u_branch")
+        clearable_input("Branch", f, "branch", "u_branch")
     with r1c3:
-        text_input_autosave("Authority Having Jurisdiction", f, "ahj", "u_ahj")
-    text_input_autosave("Customer / Site Name",  f, "customer_name",  "u_cust")
-    text_input_autosave("Street Address",         f, "street_address", "u_addr")
-    text_input_autosave("Location of Assembly",   f, "location",       "u_loc")
+        clearable_input("Authority Having Jurisdiction", f, "ahj", "u_ahj")
+    clearable_input("Customer / Site Name",  f, "customer_name",  "u_cust")
+    clearable_input("Street Address",         f, "street_address", "u_addr")
+    clearable_input("Location of Assembly",   f, "location",       "u_loc")
 
     st.divider()
     st.subheader("🔩 Backflow Assembly")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        text_input_autosave("Serial Number",  f, "serial_number", "u_sn")
+
+    # Serial Number with "Unable to Read" option
+    sn_col, sn_btn_col = st.columns([5, 1])
+    with sn_col:
+        def _sync_sn():
+            f["serial_number"] = st.session_state.get("u_sn", "")
+        st.text_input(
+            "Serial Number",
+            value=f.get("serial_number", ""),
+            key="u_sn",
+            on_change=_sync_sn,
+        )
+    with sn_btn_col:
+        st.write("")
+        if st.button("✕", key="clr_u_sn", help="Clear Serial Number"):
+            f["serial_number"] = ""
+            st.session_state["u_sn"] = ""
+            st.rerun()
+
+    unable_to_read = st.checkbox(
+        "Unable to Read serial number",
+        value=(f.get("serial_number") == "Unable to Read"),
+        key="u_sn_unable",
+    )
+    if unable_to_read:
+        f["serial_number"] = "Unable to Read"
+        st.session_state["u_sn"] = "Unable to Read"
+
+    c2, c3, c4 = st.columns(3)
     with c2:
-        text_input_autosave("Manufacturer ↺", f, "manufacturer",  "u_mfg")
+        clearable_input("Manufacturer ↺", f, "manufacturer",  "u_mfg")
     with c3:
-        text_input_autosave("Model ↺",         f, "model",         "u_mdl")
+        clearable_input("Model ↺",         f, "model",         "u_mdl")
     with c4:
-        text_input_autosave("Size ↺",           f, "size",          "u_sz")
+        clearable_input("Size ↺",           f, "size",          "u_sz")
 
     c1, c2, c3 = st.columns(3)
     asm_opts = ["", "RP", "DC", "PVB", "SVB"]
@@ -924,17 +939,17 @@ if form_choice == "United Fire (Standard)":
         with cv_c1:
             st.markdown("*CV #1*")
             _radio("CV #1 Result", ["Closed Tight","Leaked"], "cv1_result", f, horizontal=True)
-            text_input_autosave("CV #1 Differential Pressure (psi)", f, "cv1_dp", "u_cv1dp")
+            clearable_input("CV #1 Differential Pressure (psi)", f, "cv1_dp", "u_cv1dp")
         with cv_c2:
             st.markdown("*CV #2*")
             _radio("CV #2 Result", ["Closed Tight","Leaked"], "cv2_result", f, horizontal=True)
-            text_input_autosave("CV #2 Differential Pressure (psi)", f, "cv2_dp", "u_cv2dp")
+            clearable_input("CV #2 Differential Pressure (psi)", f, "cv2_dp", "u_cv2dp")
 
         st.markdown("**Relief Valve**")
         rv_c1, rv_c2, rv_c3 = st.columns(3)
         with rv_c1:
             _radio("RV Result", ["Opened At","Did Not Open"], "rv_result", f, horizontal=True)
-            text_input_autosave("RV Opened At (psi)", f, "rv_psi", "u_rvpsi")
+            clearable_input("RV Opened At (psi)", f, "rv_psi", "u_rvpsi")
         with rv_c2:
             _radio("RV Outlet", ["Closed","Leaked"], "rv_out_result", f, horizontal=True)
         with rv_c3:
@@ -945,13 +960,13 @@ if form_choice == "United Fire (Standard)":
         pvb_c1, pvb_c2 = st.columns(2)
         with pvb_c1:
             _radio("Air Inlet", ["Closed Tight","Opened At"], "pvb_ai_result", f, horizontal=True)
-            text_input_autosave("Air Inlet Opened At (psi)", f, "pvb_ai_psi", "u_aipsi")
+            clearable_input("Air Inlet Opened At (psi)", f, "pvb_ai_psi", "u_aipsi")
         with pvb_c2:
             _radio("Check Valve", ["Leaked","Held At"], "pvb_cv_result", f, horizontal=True)
-            text_input_autosave("CV Held/Leaked At (psi)", f, "pvb_cv_psi", "u_cvpsi")
+            clearable_input("CV Held/Leaked At (psi)", f, "pvb_cv_psi", "u_cvpsi")
 
     st.divider()
-    text_input_autosave("Test Date", f, "test_date", "u_tdate")
+    clearable_input("Test Date", f, "test_date", "u_tdate")
 
     res_opts = ["", "PASSED", "FAILED"]
     f["assembly_result"] = st.radio("Pass / Fail", res_opts,
@@ -968,18 +983,18 @@ if form_choice == "United Fire (Standard)":
         st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
         t1, t2, t3 = st.columns(3)
         with t1:
-            text_input_autosave("Gauge Manufacturer", f, "gauge_mfg",    "u_gmfg")
+            clearable_input("Gauge Manufacturer", f, "gauge_mfg",    "u_gmfg")
         with t2:
-            text_input_autosave("Gauge Serial #",     f, "gauge_serial", "u_gsn")
+            clearable_input("Gauge Serial #",     f, "gauge_serial", "u_gsn")
         with t3:
-            text_input_autosave("Date Calibrated",    f, "date_cal",     "u_cal")
+            clearable_input("Date Calibrated",    f, "date_cal",     "u_cal")
         t1b, t2b, t3b = st.columns(3)
         with t1b:
-            text_input_autosave("Technician",        f, "technician", "u_tech")
+            clearable_input("Technician",        f, "technician", "u_tech")
         with t2b:
-            text_input_autosave("Certification No.", f, "cert_no",    "u_cert")
+            clearable_input("Certification No.", f, "cert_no",    "u_cert")
         with t3b:
-            text_input_autosave("Re-Cert Due Date",  f, "recert",     "u_recert")
+            clearable_input("Re-Cert Due Date",  f, "recert",     "u_recert")
 
     st.divider()
 
@@ -992,8 +1007,39 @@ if form_choice == "United Fire (Standard)":
                 add_to_job_folder(pdf_bytes, fname)
                 deliver_pdf(pdf_bytes, fname)
                 st.success(f"✅ PDF ready: {fname}  |  Added to Job Folder ({len(st.session_state.job_folder)} total)")
+                st.session_state["u_show_next_action"] = True
             except Exception as e:
                 st.error(f"Error generating PDF: {e}")
+
+    # Post-PDF action prompt
+    if st.session_state.get("u_show_next_action"):
+        st.divider()
+        st.markdown("**What would you like to do next?**")
+        na1, na2, na3 = st.columns(3)
+        with na1:
+            if st.button("➡️ Next Report (same job)", use_container_width=True, key="u_next_post"):
+                kept = {k: f.get(k, "") for k in UNITED_NEXT_REPORT_KEEP}
+                kept["date"]      = date.today().strftime("%m/%d/%Y")
+                kept["test_date"] = date.today().strftime("%m/%d/%Y")
+                save_tester_defaults(f)
+                st.session_state.united_form = kept
+                st.session_state["u_show_next_action"] = False
+                st.rerun()
+        with na2:
+            if st.button("🏢 New Job", use_container_width=True, key="u_newjob_post"):
+                save_tester_defaults(f)
+                defs = get_tester_defaults()
+                f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
+                f0["date"]      = date.today().strftime("%m/%d/%Y")
+                f0["test_date"] = date.today().strftime("%m/%d/%Y")
+                st.session_state.united_form = f0
+                st.session_state.job_folder = []
+                st.session_state["u_show_next_action"] = False
+                st.rerun()
+        with na3:
+            if st.button("✋ Stay on this form", use_container_width=True, key="u_stay_post"):
+                st.session_state["u_show_next_action"] = False
+                st.rerun()
 
 # ===========================================================================
 # Jacksonville / JEA form
@@ -1008,7 +1054,6 @@ else:
 
     f = st.session_state.jax_form
 
-    # Inject active tech profile if just selected
     active = st.session_state.get("active_technician", "")
     if active:
         profile = get_technician_profile(active)
