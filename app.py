@@ -179,14 +179,32 @@ UNITED_CHECKBOXES = {
 
 UNITED_REPAIR_BOX = (228, 200, 10, 3, 70)
 
-UNITED_NEXT_REPORT_KEEP = {
-    "branch", "ahj", "customer_name", "street_address",
-    "manufacturer", "model", "size", "assembly_type", "system_service",
+# ---------------------------------------------------------------------------
+# Field color groups for United Fire form
+# ---------------------------------------------------------------------------
+# YELLOW: always keep (tester info — loaded from profile)
+UNITED_YELLOW = {
     "gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert",
 }
-UNITED_NEW_JOB_KEEP = {
-    "gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert",
+# BLUE: keep on Next Report (same job), clear on New Job, tap-to-clear on click
+UNITED_BLUE = {
+    "date", "branch", "ahj", "customer_name", "street_address",
+    "serial_number", "manufacturer", "model", "size",
+    "assembly_type", "system_service", "bypass",
 }
+# GREEN: clear after generating PDF (test results)
+# Everything not yellow or blue — location, test readings, pass/fail, test_date, repair_desc
+UNITED_GREEN = {
+    "location", "rv_psi", "cv1_dp", "cv2_dp", "pvb_ai_psi", "pvb_cv_psi",
+    "test_date", "cv1_result", "cv2_result", "rv_result", "rv_out_result",
+    "rv_in_result", "pvb_ai_result", "pvb_cv_result", "assembly_result", "repair_desc",
+}
+
+# What to keep for each action (derived from color groups above)
+# Next Report (same job): keep YELLOW + BLUE (everything except GREEN)
+UNITED_NEXT_REPORT_KEEP = UNITED_YELLOW | UNITED_BLUE
+# New Job: keep YELLOW only
+UNITED_NEW_JOB_KEEP = UNITED_YELLOW
 
 # ---------------------------------------------------------------------------
 # Jacksonville (JEA) form config
@@ -313,22 +331,76 @@ def wrap_text(text, w=58):
 
 
 # ---------------------------------------------------------------------------
-# Clearable text input helper
+# Tap-to-clear input helper
+# ---------------------------------------------------------------------------
+
+def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
+    """
+    Text input that clears its value when the user taps/clicks into it.
+
+    Uses a companion session-state flag (<widget_key>_focused) to detect
+    the first interaction. On the rerun triggered by on_change, if the flag
+    is not yet set we clear the value, set the flag, and rerun once more so
+    the user starts with a blank field.
+
+    Also includes a ✕ button for manual clearing.
+    """
+    form = st.session_state[form_key]
+    focus_flag = f"{widget_key}_focused"
+
+    # If flagged for clear-on-next-render, wipe the backing value now
+    if st.session_state.get(f"{widget_key}_do_clear"):
+        form[field_key] = ""
+        st.session_state.pop(f"{widget_key}_do_clear", None)
+        st.session_state.pop(widget_key, None)
+
+    def _on_change():
+        # First interaction → schedule a clear and rerun
+        if not st.session_state.get(focus_flag):
+            st.session_state[f"{widget_key}_do_clear"] = True
+            st.session_state[focus_flag] = True
+
+    col_input, col_btn = st.columns([5, 1])
+    with col_input:
+        val = st.text_input(
+            label,
+            value=form.get(field_key, ""),
+            key=widget_key,
+            on_change=_on_change,
+            **kwargs,
+        )
+        form[field_key] = st.session_state.get(widget_key, "")
+
+    with col_btn:
+        st.write("")
+        if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
+            form[field_key] = ""
+            st.session_state.pop(widget_key, None)
+            st.session_state.pop(focus_flag, None)
+            st.rerun()
+
+    return val
+
+
+def reset_blue_focus_flags():
+    """Call before rendering the form so tap-to-clear triggers fresh each report."""
+    blue_widget_keys = [
+        "u_date", "u_branch", "u_ahj", "u_cust", "u_addr",
+        "u_sn", "u_mfg", "u_mdl", "u_sz",
+    ]
+    for wk in blue_widget_keys:
+        st.session_state.pop(f"{wk}_focused", None)
+        st.session_state.pop(f"{wk}_do_clear", None)
+
+
+# ---------------------------------------------------------------------------
+# Standard clearable input (no tap-to-clear — for yellow/static fields)
 # ---------------------------------------------------------------------------
 
 def clearable_input(label, form_key, field_key, widget_key, **kwargs):
     """
-    Text input with an inline Clear (✕) button.
-
-    Parameters
-    ----------
-    label      : field label shown to the user
-    form_key   : st.session_state key whose value is a dict (e.g. "united_form")
-    field_key  : key inside that dict (e.g. "customer_name")
-    widget_key : unique Streamlit widget key (e.g. "u_cust")
-
-    The clear button writes "" into session_state[form_key][field_key],
-    removes the widget key so Streamlit resets the input, then reruns.
+    Text input with a ✕ clear button. No tap-to-clear behavior.
+    Used for yellow (always-keep) fields.
     """
     form = st.session_state[form_key]
 
@@ -340,15 +412,12 @@ def clearable_input(label, form_key, field_key, widget_key, **kwargs):
             key=widget_key,
             **kwargs,
         )
-        # Keep the form dict in sync whenever the widget value changes
         form[field_key] = st.session_state.get(widget_key, "")
 
     with col_btn:
-        st.write("")  # vertical alignment spacer
+        st.write("")
         if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
-            # 1. Write empty string into the backing form dict
             st.session_state[form_key][field_key] = ""
-            # 2. Remove the widget key so Streamlit re-initialises it from value=""
             st.session_state.pop(widget_key, None)
             st.rerun()
 
@@ -883,34 +952,45 @@ if form_choice == "United Fire (Standard)":
     st.subheader("📋 Job Information")
     r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
     with r1c1:
-        clearable_input("Date",   "united_form", "date",   "u_date")
+        tap_clear_input("Date",   "united_form", "date",   "u_date")
     with r1c2:
-        clearable_input("Branch", "united_form", "branch", "u_branch")
+        tap_clear_input("Branch", "united_form", "branch", "u_branch")
     with r1c3:
-        clearable_input("Authority Having Jurisdiction", "united_form", "ahj", "u_ahj")
-    clearable_input("Customer / Site Name",  "united_form", "customer_name",  "u_cust")
-    clearable_input("Street Address",         "united_form", "street_address", "u_addr")
+        tap_clear_input("Authority Having Jurisdiction", "united_form", "ahj", "u_ahj")
+    tap_clear_input("Customer / Site Name",  "united_form", "customer_name",  "u_cust")
+    tap_clear_input("Street Address",         "united_form", "street_address", "u_addr")
+
+    # Location of Assembly — GREEN: plain clearable (no tap-to-clear needed, always wiped after PDF)
     clearable_input("Location of Assembly",   "united_form", "location",       "u_loc")
 
     st.divider()
     st.subheader("🔩 Backflow Assembly")
 
-    # Serial Number with "Unable to Read" option
+    # Serial Number — BLUE: tap-to-clear + Unable to Read option
     sn_col, sn_btn_col = st.columns([5, 1])
     with sn_col:
-        def _sync_sn():
-            st.session_state.united_form["serial_number"] = st.session_state.get("u_sn", "")
+        sn_focus_flag = "u_sn_focused"
+        if st.session_state.get("u_sn_do_clear"):
+            f["serial_number"] = ""
+            st.session_state.pop("u_sn_do_clear", None)
+            st.session_state.pop("u_sn", None)
+        def _on_change_sn():
+            if not st.session_state.get(sn_focus_flag):
+                st.session_state["u_sn_do_clear"] = True
+                st.session_state[sn_focus_flag] = True
         st.text_input(
             "Serial Number",
             value=f.get("serial_number", ""),
             key="u_sn",
-            on_change=_sync_sn,
+            on_change=_on_change_sn,
         )
+        f["serial_number"] = st.session_state.get("u_sn", "")
     with sn_btn_col:
         st.write("")
         if st.button("✕", key="clr_u_sn", help="Clear Serial Number"):
-            st.session_state.united_form["serial_number"] = ""
+            f["serial_number"] = ""
             st.session_state.pop("u_sn", None)
+            st.session_state.pop(sn_focus_flag, None)
             st.rerun()
 
     unable_to_read = st.checkbox(
@@ -924,11 +1004,11 @@ if form_choice == "United Fire (Standard)":
 
     c2, c3, c4 = st.columns(3)
     with c2:
-        clearable_input("Manufacturer ↺", "united_form", "manufacturer",  "u_mfg")
+        tap_clear_input("Manufacturer ↺", "united_form", "manufacturer",  "u_mfg")
     with c3:
-        clearable_input("Model ↺",         "united_form", "model",         "u_mdl")
+        tap_clear_input("Model ↺",         "united_form", "model",         "u_mdl")
     with c4:
-        clearable_input("Size ↺",           "united_form", "size",          "u_sz")
+        tap_clear_input("Size ↺",           "united_form", "size",          "u_sz")
 
     c1, c2, c3 = st.columns(3)
     asm_opts = ["", "RP", "DC", "PVB", "SVB"]
@@ -1024,6 +1104,20 @@ if form_choice == "United Fire (Standard)":
                 add_to_job_folder(pdf_bytes, fname)
                 deliver_pdf(pdf_bytes, fname)
                 st.success(f"✅ PDF ready: {fname}  |  Added to Job Folder ({len(st.session_state.job_folder)} total)")
+
+                # Clear GREEN fields immediately after PDF generation
+                for green_key in UNITED_GREEN:
+                    f[green_key] = ""
+                # Reset radio widgets for green fields
+                for radio_key in ["cv1_result","cv2_result","rv_result","rv_out_result",
+                                  "rv_in_result","pvb_ai_result","pvb_cv_result","assembly_result"]:
+                    st.session_state.pop(radio_key, None)
+                # Reset green text widget keys
+                for wk in ["u_cv1dp","u_cv2dp","u_rvpsi","u_aipsi","u_cvpsi","u_tdate","u_loc","u_rep"]:
+                    st.session_state.pop(wk, None)
+                # Reset blue tap-to-clear focus flags so fields clear on next tap
+                reset_blue_focus_flags()
+
                 st.session_state["u_show_next_action"] = True
             except Exception as e:
                 st.error(f"Error generating PDF: {e}")
@@ -1035,15 +1129,18 @@ if form_choice == "United Fire (Standard)":
         na1, na2, na3 = st.columns(3)
         with na1:
             if st.button("➡️ Next Report (same job)", use_container_width=True, key="u_next_post"):
+                # Keep YELLOW + BLUE, wipe GREEN (already wiped above), reset dates
                 kept = {k: f.get(k, "") for k in UNITED_NEXT_REPORT_KEEP}
                 kept["date"]      = date.today().strftime("%m/%d/%Y")
                 kept["test_date"] = date.today().strftime("%m/%d/%Y")
                 save_tester_defaults(f)
                 st.session_state.united_form = kept
+                reset_blue_focus_flags()
                 st.session_state["u_show_next_action"] = False
                 st.rerun()
         with na2:
             if st.button("🏢 New Job", use_container_width=True, key="u_newjob_post"):
+                # Keep YELLOW only
                 save_tester_defaults(f)
                 defs = get_tester_defaults()
                 f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
@@ -1051,6 +1148,7 @@ if form_choice == "United Fire (Standard)":
                 f0["test_date"] = date.today().strftime("%m/%d/%Y")
                 st.session_state.united_form = f0
                 st.session_state.job_folder = []
+                reset_blue_focus_flags()
                 st.session_state["u_show_next_action"] = False
                 st.rerun()
         with na3:
