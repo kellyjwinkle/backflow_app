@@ -74,7 +74,7 @@ def load_technicians_from_github():
     return {}, None
 
 
-def save_technicians_to_github(techs: dict, current_sha: str | None):
+def save_technicians_to_github(techs: dict, current_sha):
     """Commit updated technicians.json back to the GitHub repo."""
     token = _github_token()
     if not token:
@@ -320,8 +320,9 @@ def clearable_input(label, form, key, widget_key, **kwargs):
     """Text input with an inline Clear button. Updates form[key] on change or clear."""
     col_input, col_btn = st.columns([5, 1])
     with col_input:
-        def _sync():
-            form[key] = st.session_state.get(widget_key, "")
+        # Use default args to capture current values of form/key/widget_key
+        def _sync(_form=form, _key=key, _wkey=widget_key):
+            _form[_key] = st.session_state.get(_wkey, "")
         val = st.text_input(
             label,
             value=form.get(key, ""),
@@ -662,8 +663,8 @@ def _radio(label, options, key, form, **kwargs):
     current = form.get(key, "")
     idx = opts.index(current) if current in opts else 0
 
-    def _sync_radio():
-        form[key] = st.session_state.get(key, "")
+    def _sync_radio(_form=form, _key=key):
+        _form[_key] = st.session_state.get(_key, "")
 
     chosen = st.radio(label, opts, index=idx, key=key,
                       format_func=lambda x: "—" if x == "" else x,
@@ -881,8 +882,8 @@ if form_choice == "United Fire (Standard)":
     # Serial Number with "Unable to Read" option
     sn_col, sn_btn_col = st.columns([5, 1])
     with sn_col:
-        def _sync_sn():
-            f["serial_number"] = st.session_state.get("u_sn", "")
+        def _sync_sn(_f=f):
+            _f["serial_number"] = st.session_state.get("u_sn", "")
         st.text_input(
             "Serial Number",
             value=f.get("serial_number", ""),
@@ -1262,7 +1263,7 @@ else:
                     f.get("premises_name",""),
                     f.get("service_address",""),
                     f.get("physical_location",""),
-                    prefix="JAX"
+                    prefix="JAX",
                 )
                 add_to_job_folder(pdf_bytes, fname)
                 deliver_pdf(pdf_bytes, fname)
