@@ -562,18 +562,129 @@ def _style_data_row(ws, row_idx, num_cols, pass_fail_col_idx):
         pf_cell.font = Font(bold=True, color="9C0006", size=9)
 
 
+def _build_summary_sheet(wb, job_folder):
+    """
+    Add a 'Summary' sheet as the first sheet in the workbook.
+    Columns: Form Type | Location | Pass / Fail
+    Sorted by: Form Type, then Location.
+    """
+    # Gather rows
+    rows = []
+    for item in job_folder:
+        fd = item.get("form_data", {})
+        ft = item.get("form_type", "united")
+
+        if ft == "united":
+            form_label = "United Fire"
+            location = (
+                fd.get("customer_name", "")
+                or fd.get("street_address", "")
+                or fd.get("location", "")
+            ).strip()
+        else:
+            form_label = "Jacksonville"
+            location = (
+                fd.get("premises_name", "")
+                or fd.get("service_address", "")
+                or fd.get("physical_location", "")
+            ).strip()
+
+        result = str(fd.get("assembly_result", "")).strip().upper() or "—"
+        rows.append((form_label, location or "—", result))
+
+    # Sort: form type A→Z, then location A→Z
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    # Create sheet and insert as first sheet
+    ws = wb.create_sheet("Summary", 0)
+
+    # Header
+    headers = ["Form Type", "Location / Customer", "Pass / Fail"]
+    ws.append(headers)
+    _style_header_row(ws, len(headers))
+
+    # Totals tracking
+    passed_count = 0
+    failed_count = 0
+
+    thin = Side(style="thin", color="DDDDDD")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for i, (form_label, location, result) in enumerate(rows, start=2):
+        ws.append([form_label, location, result])
+
+        bg = "EEF2F7" if i % 2 == 0 else "FFFFFF"
+        base_fill = PatternFill("solid", fgColor=bg)
+
+        # Form Type cell — subtle color-code by form type
+        ft_cell = ws.cell(row=i, column=1)
+        ft_cell.fill = base_fill
+        ft_cell.font = Font(size=10)
+        ft_cell.alignment = Alignment(vertical="center")
+        ft_cell.border = border
+
+        # Location cell
+        loc_cell = ws.cell(row=i, column=2)
+        loc_cell.fill = base_fill
+        loc_cell.font = Font(size=10)
+        loc_cell.alignment = Alignment(vertical="center")
+        loc_cell.border = border
+
+        # Pass/Fail cell — green / red highlight
+        pf_cell = ws.cell(row=i, column=3)
+        pf_cell.border = border
+        pf_cell.alignment = Alignment(horizontal="center", vertical="center")
+        if result == "PASSED":
+            pf_cell.fill = PatternFill("solid", fgColor="C6EFCE")
+            pf_cell.font = Font(bold=True, color="276221", size=10)
+            passed_count += 1
+        elif result == "FAILED":
+            pf_cell.fill = PatternFill("solid", fgColor="FFC7CE")
+            pf_cell.font = Font(bold=True, color="9C0006", size=10)
+            failed_count += 1
+        else:
+            pf_cell.fill = base_fill
+            pf_cell.font = Font(size=10, color="888888")
+
+    # Blank spacer row
+    spacer_row = len(rows) + 2
+    ws.append([])
+
+    # Totals row
+    total_row = spacer_row + 1
+    ws.cell(row=total_row, column=1).value = f"Total Reports: {len(rows)}"
+    ws.cell(row=total_row, column=1).font = Font(bold=True, size=10)
+    ws.cell(row=total_row, column=2).value = f"Passed: {passed_count}"
+    ws.cell(row=total_row, column=2).font = Font(bold=True, color="276221", size=10)
+    ws.cell(row=total_row, column=3).value = f"Failed: {failed_count}"
+    ws.cell(row=total_row, column=3).font = Font(bold=True, color="9C0006", size=10)
+
+    # Column widths
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 14
+    ws.row_dimensions[1].height = 28
+
+
 def build_excel_for_job(job_folder: list, job_name: str) -> bytes:
     """
-    Build an Excel workbook with two sheets:
+    Build an Excel workbook with three sheets:
+      - 'Summary'      — form type, location, pass/fail for every report (sorted)
       - 'United Fire'  — one row per United Fire PDF in the job
       - 'Jacksonville' — one row per JAX PDF in the job
     Returns the workbook as bytes.
     """
     wb = openpyxl.Workbook()
 
+    # Remove the default empty sheet; we'll create named sheets manually
+    default_sheet = wb.active
+    wb.remove(default_sheet)
+
+    # --- Summary sheet (inserted as sheet 0 inside _build_summary_sheet) ---
+    _build_summary_sheet(wb, job_folder)
+
     # --- United Fire sheet ---
-    ws_u = wb.active
-    ws_u.title = "United Fire"
+    ws_u = wb.create_sheet("United Fire")
     u_headers = [h for h, _ in UNITED_EXCEL_COLS]
     ws_u.append(u_headers)
     pf_u = next((i+1 for i, (h, _) in enumerate(UNITED_EXCEL_COLS) if h == "Pass / Fail"), 1)
@@ -604,7 +715,7 @@ def build_excel_for_job(job_folder: list, job_name: str) -> bytes:
             _style_data_row(ws_j, j_row, len(j_headers), pf_j)
             j_row += 1
 
-    # Auto-size columns (cap at 40)
+    # Auto-size columns on detail sheets (cap at 40)
     for ws in [ws_u, ws_j]:
         for col_cells in ws.columns:
             max_len = max((len(str(c.value or "")) for c in col_cells), default=8)
