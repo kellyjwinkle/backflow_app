@@ -320,7 +320,6 @@ def clearable_input(label, form, key, widget_key, **kwargs):
     """Text input with an inline Clear button. Updates form[key] on change or clear."""
     col_input, col_btn = st.columns([5, 1])
     with col_input:
-        # Use default args to capture current values of form/key/widget_key
         def _sync(_form=form, _key=key, _wkey=widget_key):
             _form[_key] = st.session_state.get(_wkey, "")
         val = st.text_input(
@@ -334,7 +333,9 @@ def clearable_input(label, form, key, widget_key, **kwargs):
         st.write("")  # vertical alignment spacer
         if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
             form[key] = ""
-            st.session_state[widget_key] = ""
+            # Delete the key from session state so the widget re-initializes
+            # from value="" on the next render (setting to "" is ignored by Streamlit)
+            st.session_state.pop(widget_key, None)
             st.rerun()
     return val
 
@@ -894,7 +895,7 @@ if form_choice == "United Fire (Standard)":
         st.write("")
         if st.button("✕", key="clr_u_sn", help="Clear Serial Number"):
             f["serial_number"] = ""
-            st.session_state["u_sn"] = ""
+            st.session_state.pop("u_sn", None)
             st.rerun()
 
     unable_to_read = st.checkbox(
