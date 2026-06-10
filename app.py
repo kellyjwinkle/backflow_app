@@ -195,25 +195,20 @@ UNITED_GREEN = {
 UNITED_NEXT_REPORT_KEEP = UNITED_YELLOW | UNITED_BLUE
 UNITED_NEW_JOB_KEEP = UNITED_YELLOW
 
-# Widget keys that correspond to GREEN fields (need session state cleared after PDF)
+# Widget keys for each color group — must be popped from session_state when clearing
 UNITED_GREEN_WIDGET_KEYS = [
     "u_loc", "u_cv1dp", "u_cv2dp", "u_rvpsi", "u_aipsi", "u_cvpsi",
-    "u_tdate", "u_rep",
+    "u_tdate", "u_rep", "u_res",
     "cv1_result", "cv2_result", "rv_result", "rv_out_result",
     "rv_in_result", "pvb_ai_result", "pvb_cv_result", "assembly_result",
-    # selectbox / radio widget keys that map to green fields
-    "u_res", "u_bp",
 ]
-
-# Widget keys that correspond to YELLOW (tester) fields
 UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
-
-# Widget keys that correspond to BLUE fields
 UNITED_BLUE_WIDGET_KEYS = [
     "u_date", "u_branch", "u_ahj", "u_cust", "u_addr",
-    "u_sn", "u_mfg", "u_mdl", "u_sz",
-    "u_atype", "u_ss",
+    "u_sn", "u_mfg", "u_mdl", "u_sz", "u_atype", "u_ss", "u_bp",
 ]
+
+TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
 
 # ---------------------------------------------------------------------------
 # Jacksonville (JEA) form config
@@ -306,13 +301,11 @@ JAX_NEW_JOB_KEEP = {
     "final_tester_name", "final_company", "final_cert",
 }
 
-# All JAX widget keys — cleared when form resets or tester profile injects
 JAX_GREEN_WIDGET_KEYS = [
     "j_sn", "j_id",
     "j_icv1p", "j_icv2p", "j_irvp", "j_ipvbp", "j_itd",
     "j_fcv1p", "j_fcv2p", "j_frvp",
-    "j_rep", "j_sd",
-    "j_ares",
+    "j_rep", "j_sd", "j_ares",
     "init_cv1_result", "init_cv2_result", "init_rv_result", "init_pvb_result",
     "final_cv1_result", "final_cv2_result", "final_rv_result", "final_pvb_result",
     "assembly_result",
@@ -362,7 +355,7 @@ def wrap_text(text, w=58):
 
 
 # ---------------------------------------------------------------------------
-# Tap-to-clear input helper
+# Tap-to-clear input helper  (BLUE fields)
 # ---------------------------------------------------------------------------
 
 def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
@@ -408,7 +401,7 @@ def reset_blue_focus_flags():
 
 
 # ---------------------------------------------------------------------------
-# Standard clearable input (no tap-to-clear)
+# Standard clearable input (GREEN / YELLOW fields)
 # ---------------------------------------------------------------------------
 
 def clearable_input(label, form_key, field_key, widget_key, **kwargs):
@@ -550,4 +543,671 @@ JAX_EXCEL_COLS = [
     ("Repair Company",     "repair_company"),
     ("Repair Cert",        "repair_cert"),
     ("Repair Date",        "repair_date"),
-    ("Final Tester",       "final_tester
+    ("Final Tester",       "final_tester_name"),
+    ("Final Company",      "final_company"),
+    ("Final Cert",         "final_cert"),
+    ("Final Test Date",    "final_test_date"),
+    ("Signature Date",     "signature_date"),
+]
+
+
+def _style_header_row(ws, num_cols):
+    header_fill = PatternFill("solid", fgColor="1F3864")
+    header_font = Font(bold=True, color="FFFFFF", size=10)
+    thin = Side(style="thin", color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for col in range(1, num_cols + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+    ws.row_dimensions[1].height = 30
+
+
+def _style_data_row(ws, row_idx, num_cols, pass_fail_col_idx):
+    thin = Side(style="thin", color="DDDDDD")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    bg = "EEF2F7" if row_idx % 2 == 0 else "FFFFFF"
+    fill = PatternFill("solid", fgColor=bg)
+
+    for col in range(1, num_cols + 1):
+        cell = ws.cell(row=row_idx, column=col)
+        cell.fill = fill
+        cell.font = Font(size=9)
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+        cell.border = border
+
+    pf_cell = ws.cell(row=row_idx, column=pass_fail_col_idx)
+    val = str(pf_cell.value or "").upper()
+    if val == "PASSED":
+        pf_cell.fill = PatternFill("solid", fgColor="C6EFCE")
+        pf_cell.font = Font(bold=True, color="276221", size=9)
+    elif val == "FAILED":
+        pf_cell.fill = PatternFill("solid", fgColor="FFC7CE")
+        pf_cell.font = Font(bold=True, color="9C0006", size=9)
+
+
+def _build_summary_sheet(wb, job_folder):
+    rows = []
+    for item in job_folder:
+        fd = item.get("form_data", {})
+        ft = item.get("form_type", "united")
+
+        if ft == "united":
+            form_label = "United Fire"
+            location = (
+                fd.get("customer_name", "")
+                or fd.get("street_address", "")
+                or fd.get("location", "")
+            ).strip()
+        else:
+            form_label = "Jacksonville"
+            location = (
+                fd.get("premises_name", "")
+                or fd.get("service_address", "")
+                or fd.get("physical_location", "")
+            ).strip()
+
+        result = str(fd.get("assembly_result", "")).strip().upper() or "—"
+        rows.append((form_label, location or "—", result))
+
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    ws = wb.create_sheet("Summary", 0)
+
+    headers = ["Form Type", "Location / Customer", "Pass / Fail"]
+    ws.append(headers)
+    _style_header_row(ws, len(headers))
+
+    passed_count = 0
+    failed_count = 0
+
+    thin = Side(style="thin", color="DDDDDD")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for i, (form_label, location, result) in enumerate(rows, start=2):
+        ws.append([form_label, location, result])
+
+        bg = "EEF2F7" if i % 2 == 0 else "FFFFFF"
+        base_fill = PatternFill("solid", fgColor=bg)
+
+        ft_cell = ws.cell(row=i, column=1)
+        ft_cell.fill = base_fill
+        ft_cell.font = Font(size=10)
+        ft_cell.alignment = Alignment(vertical="center")
+        ft_cell.border = border
+
+        loc_cell = ws.cell(row=i, column=2)
+        loc_cell.fill = base_fill
+        loc_cell.font = Font(size=10)
+        loc_cell.alignment = Alignment(vertical="center")
+        loc_cell.border = border
+
+        pf_cell = ws.cell(row=i, column=3)
+        pf_cell.border = border
+        pf_cell.alignment = Alignment(horizontal="center", vertical="center")
+        if result == "PASSED":
+            pf_cell.fill = PatternFill("solid", fgColor="C6EFCE")
+            pf_cell.font = Font(bold=True, color="276221", size=10)
+            passed_count += 1
+        elif result == "FAILED":
+            pf_cell.fill = PatternFill("solid", fgColor="FFC7CE")
+            pf_cell.font = Font(bold=True, color="9C0006", size=10)
+            failed_count += 1
+        else:
+            pf_cell.fill = base_fill
+            pf_cell.font = Font(size=10, color="888888")
+
+    spacer_row = len(rows) + 2
+    ws.append([])
+    total_row = spacer_row + 1
+    ws.cell(row=total_row, column=1).value = f"Total Reports: {len(rows)}"
+    ws.cell(row=total_row, column=1).font = Font(bold=True, size=10)
+    ws.cell(row=total_row, column=2).value = f"Passed: {passed_count}"
+    ws.cell(row=total_row, column=2).font = Font(bold=True, color="276221", size=10)
+    ws.cell(row=total_row, column=3).value = f"Failed: {failed_count}"
+    ws.cell(row=total_row, column=3).font = Font(bold=True, color="9C0006", size=10)
+
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 14
+    ws.row_dimensions[1].height = 28
+
+
+def build_excel_for_job(job_folder: list, job_name: str) -> bytes:
+    wb = openpyxl.Workbook()
+    default_sheet = wb.active
+    wb.remove(default_sheet)
+
+    _build_summary_sheet(wb, job_folder)
+
+    ws_u = wb.create_sheet("United Fire")
+    u_headers = [h for h, _ in UNITED_EXCEL_COLS]
+    ws_u.append(u_headers)
+    pf_u = next((i+1 for i, (h, _) in enumerate(UNITED_EXCEL_COLS) if h == "Pass / Fail"), 1)
+    _style_header_row(ws_u, len(u_headers))
+
+    ws_j = wb.create_sheet("Jacksonville")
+    j_headers = [h for h, _ in JAX_EXCEL_COLS]
+    ws_j.append(j_headers)
+    pf_j = next((i+1 for i, (h, _) in enumerate(JAX_EXCEL_COLS) if h == "Pass / Fail"), 1)
+    _style_header_row(ws_j, len(j_headers))
+
+    u_row = 2
+    j_row = 2
+
+    for item in job_folder:
+        form_data = item.get("form_data", {})
+        form_type = item.get("form_type", "united")
+
+        if form_type == "united":
+            row = [form_data.get(fk, "") for _, fk in UNITED_EXCEL_COLS]
+            ws_u.append(row)
+            _style_data_row(ws_u, u_row, len(u_headers), pf_u)
+            u_row += 1
+        else:
+            row = [form_data.get(fk, "") for _, fk in JAX_EXCEL_COLS]
+            ws_j.append(row)
+            _style_data_row(ws_j, j_row, len(j_headers), pf_j)
+            j_row += 1
+
+    for ws in [ws_u, ws_j]:
+        for col_cells in ws.columns:
+            max_len = max((len(str(c.value or "")) for c in col_cells), default=8)
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 2, 40)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+# ---------------------------------------------------------------------------
+# Job folder
+# ---------------------------------------------------------------------------
+
+def _init_job_folder():
+    if "job_folder" not in st.session_state:
+        st.session_state.job_folder = []
+
+
+def add_to_job_folder(pdf_bytes: bytes, filename: str, form_data: dict, form_type: str):
+    _init_job_folder()
+    st.session_state.job_folder = [
+        f for f in st.session_state.job_folder if f["name"] != filename
+    ]
+    st.session_state.job_folder.append({
+        "name": filename,
+        "bytes": pdf_bytes,
+        "form_data": dict(form_data),
+        "form_type": form_type,
+    })
+
+
+def build_zip() -> bytes:
+    folder = st.session_state.job_folder
+    job_name = st.session_state.get("job_folder_name", "").strip() or "Job"
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for item in folder:
+            zf.writestr(item["name"], item["bytes"])
+        try:
+            excel_bytes = build_excel_for_job(folder, job_name)
+            excel_name = re.sub(r"[^\w\s\-]", "", job_name).strip() or "Job"
+            zf.writestr(f"{excel_name} - Report Summary.xlsx", excel_bytes)
+        except Exception as e:
+            zf.writestr("excel_error.txt", f"Excel export failed: {e}")
+
+    buf.seek(0)
+    return buf.read()
+
+
+def render_job_folder_sidebar():
+    _init_job_folder()
+    folder = st.session_state.job_folder
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📁 Job Folder")
+
+    if "job_folder_name" not in st.session_state:
+        st.session_state.job_folder_name = ""
+    st.session_state.job_folder_name = st.sidebar.text_input(
+        "Job name (for ZIP file)",
+        value=st.session_state.job_folder_name,
+        placeholder="e.g. Smith Residence",
+        key="job_name_input",
+    )
+
+    if not folder:
+        st.sidebar.caption("No reports yet. Generate a PDF to add it here.")
+        return
+
+    st.sidebar.caption(f"{len(folder)} report(s) in this job folder:")
+    for item in folder:
+        st.sidebar.markdown(f"• {item['name']}")
+
+    zip_bytes = build_zip()
+    entered_name = st.session_state.job_folder_name.strip()
+    if entered_name:
+        zip_name = re.sub(r"[^\w\s\-]", "", entered_name).strip()
+    else:
+        first_name = folder[0]["name"].replace(".pdf", "")
+        zip_name = re.sub(r" - [^-]+$", "", first_name)
+        zip_name = re.sub(r"[^\w\s\-]", "", zip_name).strip() or "Job"
+    zip_filename = f"{zip_name} - Reports.zip"
+
+    st.sidebar.download_button(
+        label=f"📦 Download ZIP ({len(folder)} report{'s' if len(folder)!=1 else ''} + Excel)",
+        data=zip_bytes,
+        file_name=zip_filename,
+        mime="application/zip",
+        use_container_width=True,
+        key=f"zip_dl_{len(folder)}",
+    )
+
+    st.sidebar.caption("📱 iPhone/iPad: tap ZIP button → Share → Save to Files")
+    st.sidebar.caption("📊 ZIP includes an Excel summary of all reports in this job.")
+
+    if st.sidebar.button("🗑️ Clear Job Folder", use_container_width=True, key="clear_folder"):
+        st.session_state.job_folder = []
+        st.session_state.job_folder_name = ""
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# PDF merge helper
+# ---------------------------------------------------------------------------
+
+def _merge_overlay(template_path: str, overlay_buf: BytesIO) -> bytes:
+    overlay_buf.seek(0)
+    overlay_reader = PdfReader(overlay_buf)
+    template_reader = PdfReader(template_path)
+
+    writer = PdfWriter()
+    template_page = template_reader.pages[0]
+    overlay_page = overlay_reader.pages[0]
+    template_page.merge_page(overlay_page)
+    writer.add_page(template_page)
+
+    out = BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out.read()
+
+
+# ---------------------------------------------------------------------------
+# United Fire PDF generator
+# ---------------------------------------------------------------------------
+
+def generate_united_pdf(form):
+    overlay_buf = BytesIO()
+    c = canvas.Canvas(overlay_buf, pagesize=(PAGE_W, PAGE_H))
+
+    for field, (x, y, sz) in UNITED_TEXT_FIELDS.items():
+        put_text(c, form.get(field, ""), x, y, sz)
+
+    atype = form.get("assembly_type", "")
+    if atype in UNITED_CHECKBOXES:
+        draw_x(c, *UNITED_CHECKBOXES[atype])
+
+    svc = form.get("system_service", "")
+    if svc in UNITED_CHECKBOXES:
+        draw_x(c, *UNITED_CHECKBOXES[svc])
+
+    bp = form.get("bypass", "")
+    if bp == "YES": draw_x(c, *UNITED_CHECKBOXES["BYPASS_YES"])
+    elif bp == "NO": draw_x(c, *UNITED_CHECKBOXES["BYPASS_NO"])
+
+    cv1 = form.get("cv1_result", "")
+    if cv1 == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["CV1_CLOSED"])
+    elif cv1 == "Leaked": draw_x(c, *UNITED_CHECKBOXES["CV1_LEAKED"])
+
+    cv2 = form.get("cv2_result", "")
+    if cv2 == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["CV2_CLOSED"])
+    elif cv2 == "Leaked": draw_x(c, *UNITED_CHECKBOXES["CV2_LEAKED"])
+
+    rv = form.get("rv_result", "")
+    if rv == "Opened At": draw_x(c, *UNITED_CHECKBOXES["RV_OPENED"])
+    elif rv == "Did Not Open": draw_x(c, *UNITED_CHECKBOXES["RV_DIDNOTOPEN"])
+
+    rvo = form.get("rv_out_result", "")
+    if rvo == "Closed": draw_x(c, *UNITED_CHECKBOXES["RV_OUT_CLOSED"])
+    elif rvo == "Leaked": draw_x(c, *UNITED_CHECKBOXES["RV_OUT_LEAKED"])
+
+    rvi = form.get("rv_in_result", "")
+    if rvi == "Closed": draw_x(c, *UNITED_CHECKBOXES["RV_IN_CLOSED"])
+    elif rvi == "Leaked": draw_x(c, *UNITED_CHECKBOXES["RV_IN_LEAKED"])
+
+    pvb_ai = form.get("pvb_ai_result", "")
+    if pvb_ai == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["PVB_AI_CLOSED"])
+    elif pvb_ai == "Opened At": draw_x(c, *UNITED_CHECKBOXES["PVB_AI_OPENED"])
+
+    pvb_cv = form.get("pvb_cv_result", "")
+    if pvb_cv == "Leaked": draw_x(c, *UNITED_CHECKBOXES["PVB_CV_LEAKED"])
+    elif pvb_cv == "Held At": draw_x(c, *UNITED_CHECKBOXES["PVB_CV_HELD"])
+
+    result = form.get("assembly_result", "")
+    if result == "PASSED": draw_x(c, *UNITED_CHECKBOXES["PASSED"])
+    elif result == "FAILED": draw_x(c, *UNITED_CHECKBOXES["FAILED"])
+
+    rx, ry, rh, rmax, rw = UNITED_REPAIR_BOX
+    for i, ln in enumerate(wrap_text(form.get("repair_desc", ""), rw)[:rmax]):
+        put_text(c, ln, rx, ry - i * rh, 7)
+
+    sig_ir = get_signature_image_reader()
+    if sig_ir:
+        c.drawImage(sig_ir, UNITED_SIG_X, UNITED_SIG_Y,
+                    width=UNITED_SIG_W, height=UNITED_SIG_H, mask="auto")
+
+    c.save()
+    return _merge_overlay(TEMPLATE_UNITED, overlay_buf)
+
+
+def generate_jax_pdf(form):
+    overlay_buf = BytesIO()
+    c = canvas.Canvas(overlay_buf, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
+
+    for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
+        put_text(c, form.get(field, ""), x, y, sz)
+
+    ctp = form.get("comm_test_purpose", "")
+    for key, label in [("COMM_ANNUAL","Annual"),("COMM_REPAIR","Repair"),
+                       ("COMM_REPLACEMENT","Replacement"),("COMM_NEW_INSTALL","New Installation")]:
+        if ctp == label:
+            draw_x(c, *JAX_CHECKBOXES[key])
+
+    cst = form.get("comm_service_type", "")
+    for key, label in [("COMM_FIRE","Fire"),("COMM_IRRIGATION","Irrigation"),
+                       ("COMM_PROCESS","Process/Isolation"),("COMM_POTABLE","Potable"),
+                       ("COMM_FIRE_BYPASS","Fire bypass")]:
+        if cst == label:
+            draw_x(c, *JAX_CHECKBOXES[key])
+
+    rcl = form.get("comm_reclaim", "")
+    if rcl == "Yes": draw_x(c, *JAX_CHECKBOXES["RECLAIM_YES"])
+    elif rcl == "No": draw_x(c, *JAX_CHECKBOXES["RECLAIM_NO"])
+
+    rtp = form.get("res_test_purpose", "")
+    for key, label in [("RES_ANNUAL","Annual"),("RES_REPAIR","Repair"),
+                       ("RES_REPLACEMENT","Replacement"),("RES_NEW_INSTALL","New Installation")]:
+        if rtp == label:
+            draw_x(c, *JAX_CHECKBOXES[key])
+
+    rst = form.get("res_service_type", "")
+    for key, label in [("RES_POTABLE","Potable"),("RES_IRRIGATION","Irrigation / Is reclaimed")]:
+        if rst == label:
+            draw_x(c, *JAX_CHECKBOXES[key])
+
+    res_rcl = form.get("res_reclaim", "")
+    if res_rcl == "Yes": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_YES"])
+    elif res_rcl == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
+
+    icv1 = form.get("init_cv1_result", "")
+    if icv1 == "Closed Tight":
+        draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
+
+    icv2 = form.get("init_cv2_result", "")
+    if icv2 == "Closed Tight":
+        draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
+
+    irv = form.get("init_rv_result", "")
+    if irv == "Opened At": draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
+    elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
+
+    ipvb = form.get("init_pvb_result", "")
+    if ipvb == "Air inlet opened at": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
+    elif ipvb == "Did not open": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
+
+    fcv1 = form.get("final_cv1_result", "")
+    if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
+
+    fcv2 = form.get("final_cv2_result", "")
+    if fcv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_CLOSED"])
+
+    frv = form.get("final_rv_result", "")
+    if frv == "Opened At": draw_x(c, *JAX_CHECKBOXES["FINAL_RV_OPENED"])
+
+    fpvb = form.get("final_pvb_result", "")
+    if fpvb == "Satisfactory": draw_x(c, *JAX_CHECKBOXES["FINAL_PVB_SAT"])
+
+    result = form.get("assembly_result", "")
+    if result == "PASSED": draw_x(c, *JAX_CHECKBOXES["JAX_PASSED"])
+    elif result == "FAILED": draw_x(c, *JAX_CHECKBOXES["JAX_FAILED"])
+
+    sig_ir = get_signature_image_reader()
+    if sig_ir:
+        c.drawImage(sig_ir, JAX_SIG_X, JAX_SIG_Y,
+                    width=JAX_SIG_W, height=JAX_SIG_H, mask="auto")
+
+    c.save()
+    return _merge_overlay(TEMPLATE_JAX, overlay_buf)
+
+
+# ---------------------------------------------------------------------------
+# Delivery
+# ---------------------------------------------------------------------------
+
+def safe_filename(customer, street, location, prefix=""):
+    def clean(s): return re.sub(r"[^\w\s\-]", "", s or "").strip()
+    parts = [clean(customer) or "Customer",
+             clean(street) or "Address",
+             clean(location) or "Location"]
+    name = " - ".join(parts) + ".pdf"
+    return (prefix + " " + name).strip() if prefix else name
+
+
+def deliver_pdf(pdf_bytes: bytes, filename: str):
+    st.download_button(
+        label="📥 Download PDF",
+        data=pdf_bytes,
+        file_name=filename,
+        mime="application/pdf",
+        use_container_width=True,
+        key=f"pdf_dl_{filename}_{len(st.session_state.get('job_folder', []))}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-save helper (used by JAX form)
+# ---------------------------------------------------------------------------
+
+def _sync(form, key, widget_key):
+    form[key] = st.session_state.get(widget_key, "")
+
+
+def text_input_autosave(label, form, key, widget_key, **kwargs):
+    return st.text_input(
+        label,
+        value=form.get(key, ""),
+        key=widget_key,
+        on_change=_sync,
+        args=(form, key, widget_key),
+        **kwargs,
+    )
+
+
+def _radio(label, options, key, form, **kwargs):
+    opts = [""] + list(options)
+    current = form.get(key, "")
+    idx = opts.index(current) if current in opts else 0
+
+    def _sync_radio(_form=form, _key=key):
+        _form[_key] = st.session_state.get(_key, "")
+
+    chosen = st.radio(label, opts, index=idx, key=key,
+                      format_func=lambda x: "—" if x == "" else x,
+                      on_change=_sync_radio, **kwargs)
+    form[key] = chosen
+    return chosen
+
+
+# ===========================================================================
+# Technician selector sidebar widget
+# ===========================================================================
+
+def render_technician_sidebar():
+    _init_technicians()
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("👷 Technician")
+
+    names = get_technician_names()
+    current = st.session_state.get("active_technician", "")
+    idx = names.index(current) if current in names else 0
+
+    selected = st.sidebar.selectbox(
+        "Select technician",
+        names,
+        index=idx,
+        format_func=lambda x: "— select —" if x == "" else x,
+        key="tech_selector",
+    )
+
+    if selected != st.session_state.get("active_technician", ""):
+        # Technician changed — load profile and inject into both forms
+        profile = get_technician_profile(selected) if selected else {}
+        st.session_state["active_technician"] = selected
+        st.session_state["signature_b64"] = profile.get("signature_b64", "")
+
+        # Inject tester fields into United Fire form (clear widget keys so new values render)
+        if "united_form" in st.session_state:
+            for k in TESTER_KEYS:
+                st.session_state["united_form"][k] = profile.get(k, "")
+            for wk in UNITED_TESTER_WIDGET_KEYS:
+                st.session_state.pop(wk, None)
+
+        # Inject tester fields into JAX form
+        if "jax_form" in st.session_state:
+            jax_tech_map = {
+                "init_tester_name": "technician",
+                "init_cert": "cert_no",
+                "final_tester_name": "technician",
+                "final_cert": "cert_no",
+            }
+            for form_key, profile_key in jax_tech_map.items():
+                st.session_state["jax_form"][form_key] = profile.get(profile_key, "")
+            for wk in JAX_TESTER_WIDGET_KEYS:
+                st.session_state.pop(wk, None)
+
+        # Store tester_defaults for fresh form initialization
+        st.session_state["tester_defaults"] = {k: profile.get(k, "") for k in TESTER_KEYS}
+
+        st.rerun()
+
+    if not selected:
+        st.sidebar.caption("Select your name to load your profile.")
+        return
+
+    with st.sidebar.expander("✏️ Edit My Profile", expanded=False):
+        profile = get_technician_profile(selected)
+
+        new_name   = st.text_input("Display name",        value=profile.get("technician", selected), key="pe_name")
+        new_cert   = st.text_input("Certification No.",   value=profile.get("cert_no", ""),           key="pe_cert")
+        new_recert = st.text_input("Re-Cert Due Date",    value=profile.get("recert", ""),             key="pe_recert")
+        new_gmfg   = st.text_input("Gauge Manufacturer",  value=profile.get("gauge_mfg", ""),         key="pe_gmfg")
+        new_gsn    = st.text_input("Gauge Serial #",      value=profile.get("gauge_serial", ""),      key="pe_gsn")
+        new_gcal   = st.text_input("Date Calibrated",     value=profile.get("date_cal", ""),          key="pe_gcal")
+
+        st.markdown("**Signature**")
+        if st.session_state.get("signature_b64"):
+            st.success("Signature on file ✓")
+            if st.button("🗑️ Clear signature", key="pe_clrsig"):
+                clear_signature()
+                st.rerun()
+        else:
+            try:
+                from streamlit_drawable_canvas import st_canvas
+                sig_canvas = st_canvas(
+                    fill_color="rgba(255,255,255,0)",
+                    stroke_width=2,
+                    stroke_color="#cc0000",
+                    background_color="#ffffff",
+                    height=80, width=220,
+                    drawing_mode="freedraw",
+                    key="pe_sig_canvas",
+                )
+                if st.button("💾 Save signature", key="pe_savesig"):
+                    if sig_canvas.image_data is not None and sig_canvas.image_data.max() > 0:
+                        b64 = save_signature(sig_canvas.image_data)
+                        st.session_state["signature_b64"] = b64
+                    else:
+                        st.warning("Draw your signature first.")
+            except ImportError:
+                st.warning("`streamlit-drawable-canvas` not installed.")
+
+        if st.button("💾 Save Profile to Server", key="pe_save", use_container_width=True):
+            updated_profile = {
+                "technician":    new_name,
+                "cert_no":       new_cert,
+                "recert":        new_recert,
+                "gauge_mfg":     new_gmfg,
+                "gauge_serial":  new_gsn,
+                "date_cal":      new_gcal,
+                "signature_b64": st.session_state.get("signature_b64", ""),
+            }
+            techs = st.session_state["technicians"]
+            if new_name != selected and new_name.strip():
+                techs.pop(selected, None)
+                key_name = new_name
+            else:
+                key_name = selected
+            techs[key_name] = updated_profile
+            ok, msg = save_technicians_to_github(
+                techs, st.session_state.get("technicians_sha")
+            )
+            if ok:
+                st.success(msg)
+                st.session_state["active_technician"] = key_name
+                _, new_sha = load_technicians_from_github()
+                st.session_state["technicians_sha"] = new_sha
+                # Re-inject updated profile into active forms
+                for k in TESTER_KEYS:
+                    if "united_form" in st.session_state:
+                        st.session_state["united_form"][k] = updated_profile.get(k, "")
+                for wk in UNITED_TESTER_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
+            else:
+                st.error(msg)
+
+    with st.sidebar.expander("➕ Add New Technician", expanded=False):
+        new_tech_name = st.text_input("Full name", key="new_tech_name")
+        if st.button("Add", key="new_tech_add"):
+            name = new_tech_name.strip()
+            if name and name not in st.session_state["technicians"]:
+                blank = {
+                    "technician": name, "cert_no": "", "recert": "",
+                    "gauge_mfg": "", "gauge_serial": "", "date_cal": "",
+                    "signature_b64": "",
+                }
+                st.session_state["technicians"][name] = blank
+                ok, msg = save_technicians_to_github(
+                    st.session_state["technicians"],
+                    st.session_state.get("technicians_sha")
+                )
+                if ok:
+                    st.success(f"Added {name}")
+                    _, new_sha = load_technicians_from_github()
+                    st.session_state["technicians_sha"] = new_sha
+                    st.rerun()
+                else:
+                    st.error(msg)
+            elif name in st.session_state["technicians"]:
+                st.warning("That name already exists.")
+            else:
+                st.warning("Enter a name first.")
+
+
+# ===========================================================================
+# App layout
+# ===========================================================================
+
+st.set_page_config(page_title="Backflow Report", page_icon="🔧", layout="wide")
+_init_job_folder()
+_init_technicians()
+
+render_technician_sidebar()
+render_job_folder_sidebar()
+
+st.title("🔧 Backflow Preventer Test Report")
+
+# --------------------------------------------------------------------------
