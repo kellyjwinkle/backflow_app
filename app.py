@@ -599,8 +599,8 @@ def _build_summary_sheet(wb, job_folder):
                 or fd.get("physical_location", "")
             ).strip()
 
-        result = str(fd.get("assembly_result", "")).strip().upper() or "—"
-        rows.append((form_label, location or "—", result))
+        result = str(fd.get("assembly_result", "")).strip().upper() or "\u2014"
+        rows.append((form_label, location or "\u2014", result))
 
     rows.sort(key=lambda r: (r[0], r[1]))
 
@@ -905,6 +905,36 @@ def _clear_tester_widget_state():
         st.session_state.pop(wk, None)
 
 
+def apply_profile_to_forms(profile: dict):
+    """Central helper: push a technician profile into both active forms + signature."""
+    if not profile:
+        return
+
+    if profile.get("signature_b64"):
+        st.session_state["signature_b64"] = profile["signature_b64"]
+
+    for key in ["united_form", "jax_form"]:
+        if key not in st.session_state:
+            continue
+        form = st.session_state[key]
+        for tk in TESTER_KEYS:
+            form[tk] = profile.get(tk, "")
+        jax_map = {
+            "init_tester_name":  "technician",
+            "init_company":      "company",
+            "init_cert":         "cert_no",
+            "final_tester_name": "technician",
+            "final_company":     "company",
+            "final_cert":        "cert_no",
+        }
+        for jk, pk in jax_map.items():
+            form[jk] = profile.get(pk, "")
+
+    _clear_tester_widget_state()
+    st.session_state.pop("_united_tester_preloaded", None)
+    st.session_state.pop("_jax_tester_preloaded", None)
+
+
 def _init_form(key, defaults=None):
     if key not in st.session_state:
         st.session_state[key] = defaults or {}
@@ -915,7 +945,7 @@ def _init_form(key, defaults=None):
 # ===========================================================================
 
 def render_technician_sidebar():
-    st.sidebar.title("👤 Technician Profile")
+    st.sidebar.title("\U0001f464 Technician Profile")
 
     names = get_technician_names()
     prev_sel = st.session_state.get("_sidebar_tech_sel", "")
@@ -929,54 +959,28 @@ def render_technician_sidebar():
         key="sidebar_tech_select",
     )
 
-    if selected != prev_sel:
-        st.session_state["_sidebar_tech_sel"] = selected
-        profile = get_technician_profile(selected) if selected else {}
-        if profile.get("signature_b64"):
-            st.session_state["signature_b64"] = profile.get("signature_b64")
-        for key in ["united_form", "jax_form"]:
-            if key in st.session_state:
-                form = st.session_state[key]
-                for tk in TESTER_KEYS:
-                    form[tk] = profile.get(tk, "")
-                jax_map = {
-                    "init_tester_name": "technician",
-                    "init_company":     "company",
-                    "init_cert":        "cert_no",
-                    "final_tester_name":"technician",
-                    "final_company":    "company",
-                    "final_cert":       "cert_no",
-                }
-                for jk, pk in jax_map.items():
-                    form[jk] = profile.get(pk, "")
-        _clear_tester_widget_state()
+    st.session_state["_sidebar_tech_sel"] = selected
+
+    # --- Load Selected Profile button ---
+    if st.sidebar.button(
+        "\U0001f4e5 Load Selected Profile",
+        key="load_profile_btn",
+        disabled=not bool(selected),
+    ):
+        profile = get_technician_profile(selected)
+        apply_profile_to_forms(profile)
+        st.sidebar.success(f"Loaded: {selected}")
         st.rerun()
 
+    # Auto-populate on first load
     if selected and "_sidebar_tech_populated" not in st.session_state:
         st.session_state["_sidebar_tech_populated"] = True
         profile = get_technician_profile(selected)
-        if profile.get("signature_b64"):
-            st.session_state["signature_b64"] = profile.get("signature_b64")
-        for key in ["united_form", "jax_form"]:
-            if key in st.session_state:
-                form = st.session_state[key]
-                for tk in TESTER_KEYS:
-                    form[tk] = profile.get(tk, "")
-                jax_map = {
-                    "init_tester_name": "technician",
-                    "init_company":     "company",
-                    "init_cert":        "cert_no",
-                    "final_tester_name":"technician",
-                    "final_company":    "company",
-                    "final_cert":       "cert_no",
-                }
-                for jk, pk in jax_map.items():
-                    form[jk] = profile.get(pk, "")
-        _clear_tester_widget_state()
+        apply_profile_to_forms(profile)
 
     st.sidebar.divider()
 
-    with st.sidebar.expander("✏️ Edit / Add Profile", expanded=False):
+    with st.sidebar.expander("\u270f\ufe0f Edit / Add Profile", expanded=False):
         current = get_technician_profile(selected) if selected else {}
         prof_name = st.text_input("Name (key)", value=selected, key="prof_name")
         prof_co   = st.text_input("Company",    value=current.get("company", ""), key="prof_co")
@@ -990,16 +994,16 @@ def render_technician_sidebar():
             st.caption("Saved profile signature:")
             st.image(base64.b64decode(current["signature_b64"]), width=180)
 
-        if st.button("💾 Save Profile", key="save_profile_btn"):
+        if st.button("\U0001f4be Save Profile", key="save_profile_btn"):
             if prof_name.strip():
                 profile = {
-                    "technician":   prof_name.strip(),
-                    "company":      prof_co.strip(),
-                    "cert_no":      prof_cert.strip(),
-                    "recert":       prof_rec.strip(),
-                    "gauge_mfg":    prof_gmfg.strip(),
-                    "gauge_serial": prof_gsn.strip(),
-                    "date_cal":     prof_cal.strip(),
+                    "technician":    prof_name.strip(),
+                    "company":       prof_co.strip(),
+                    "cert_no":       prof_cert.strip(),
+                    "recert":        prof_rec.strip(),
+                    "gauge_mfg":     prof_gmfg.strip(),
+                    "gauge_serial":  prof_gsn.strip(),
+                    "date_cal":      prof_cal.strip(),
                     "signature_b64": st.session_state.get("signature_b64", ""),
                 }
                 ok, msg = upsert_technician_profile(prof_name.strip(), profile)
@@ -1008,6 +1012,7 @@ def render_technician_sidebar():
                 else:
                     st.warning(msg)
                 st.session_state["_sidebar_tech_sel"] = prof_name.strip()
+                st.session_state.pop("_sidebar_tech_populated", None)
                 st.rerun()
             else:
                 st.error("Name cannot be empty.")
@@ -1015,15 +1020,33 @@ def render_technician_sidebar():
     st.sidebar.divider()
     st.sidebar.markdown("**Signature**")
 
+    # Show current saved signature
     sig_b64 = st.session_state.get("signature_b64")
     if sig_b64:
-        st.sidebar.image(base64.b64decode(sig_b64), caption="Saved signature", use_container_width=True)
-        if st.sidebar.button("🗑️ Clear Signature", key="sb_clear_sig"):
-            clear_signature()
-            st.rerun()
-    else:
-        st.sidebar.caption("Draw your signature below:")
+        st.sidebar.image(
+            base64.b64decode(sig_b64),
+            caption="Current signature",
+            use_container_width=True,
+        )
 
+    # Upload option
+    upload = st.sidebar.file_uploader(
+        "Upload signature (PNG preferred)",
+        type=["png", "jpg", "jpeg"],
+        key="sig_upload",
+    )
+    if upload is not None:
+        try:
+            img = Image.open(upload).convert("RGBA")
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            st.session_state["signature_b64"] = base64.b64encode(buf.getvalue()).decode()
+            st.sidebar.success("Uploaded signature loaded.")
+        except Exception as e:
+            st.sidebar.error(f"Could not read uploaded signature: {e}")
+
+    # Draw option
+    st.sidebar.caption("Or draw your signature below:")
     try:
         from streamlit_drawable_canvas import st_canvas
         canvas_result = st_canvas(
@@ -1042,6 +1065,22 @@ def render_technician_sidebar():
                 save_signature(arr)
     except ImportError:
         st.sidebar.info("Install streamlit-drawable-canvas for signature support.")
+
+    # Action buttons
+    col_sig1, col_sig2 = st.sidebar.columns(2)
+    with col_sig1:
+        if st.button("\U0001f5d1\ufe0f Clear Sig", key="sb_clear_sig"):
+            clear_signature()
+            st.rerun()
+    with col_sig2:
+        if selected and st.button("\U0001f4be Save Sig", key="save_sig_to_profile"):
+            current = get_technician_profile(selected)
+            current["signature_b64"] = st.session_state.get("signature_b64", "")
+            ok, msg = upsert_technician_profile(selected, current)
+            if ok:
+                st.sidebar.success("Signature saved to profile.")
+            else:
+                st.sidebar.warning(msg)
 
 
 # ===========================================================================
@@ -1062,7 +1101,7 @@ def render_united_tab():
             st.session_state["signature_b64"] = profile.get("signature_b64")
         st.session_state["_united_tester_preloaded"] = True
 
-    st.subheader("📋 United Fire — Backflow Test Report")
+    st.subheader("\U0001f4cb United Fire \u2014 Backflow Test Report")
 
     col1, col2 = st.columns([1.15, 1])
     with col1:
@@ -1198,11 +1237,11 @@ def render_united_tab():
 
     col_gen, col_save = st.columns(2)
     with col_gen:
-        if st.button("🖨️ Generate PDF", key="u_gen_pdf"):
+        if st.button("\U0001f5a8\ufe0f Generate PDF", key="u_gen_pdf"):
             try:
                 pdf_bytes = generate_united_pdf(form)
                 fname = f"backflow_{form.get('customer_name','report').replace(' ','_')}.pdf"
-                st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="u_dl_pdf")
+                st.download_button("\U0001f4e5 Download PDF", pdf_bytes, fname, "application/pdf", key="u_dl_pdf")
                 for k in UNITED_GREEN - {"assembly_type", "system_service", "bypass"}:
                     form.pop(k, None)
                 for wk in UNITED_GREEN_WIDGET_KEYS:
@@ -1211,7 +1250,7 @@ def render_united_tab():
                 st.error(f"PDF error: {e}")
 
     with col_save:
-        if st.button("💾 Save to Job Folder", key="u_save_job"):
+        if st.button("\U0001f4be Save to Job Folder", key="u_save_job"):
             if "job_folder" not in st.session_state:
                 st.session_state["job_folder"] = []
             st.session_state["job_folder"].append({
@@ -1224,7 +1263,7 @@ def render_united_tab():
     st.divider()
     col_nr, col_nj = st.columns(2)
     with col_nr:
-        if st.button("🔄 Next Report (same job)", key="u_next_report"):
+        if st.button("\U0001f504 Next Report (same job)", key="u_next_report"):
             keep = {k: v for k, v in form.items() if k in UNITED_NEXT_REPORT_KEEP}
             st.session_state["united_form"] = keep
             for wk in UNITED_GREEN_WIDGET_KEYS:
@@ -1232,7 +1271,7 @@ def render_united_tab():
             st.session_state.pop("_united_tester_preloaded", None)
             st.rerun()
     with col_nj:
-        if st.button("🆕 New Job", key="u_new_job"):
+        if st.button("\U0001f195 New Job", key="u_new_job"):
             keep = {k: v for k, v in form.items() if k in UNITED_NEW_JOB_KEEP}
             st.session_state["united_form"] = keep
             for wk in UNITED_GREEN_WIDGET_KEYS + UNITED_BLUE_WIDGET_KEYS:
@@ -1254,12 +1293,12 @@ def render_jax_tab():
     if selected_tech and not st.session_state.get("_jax_tester_preloaded"):
         profile = get_technician_profile(selected_tech)
         jax_map = {
-            "init_tester_name": "technician",
-            "init_company":     "company",
-            "init_cert":        "cert_no",
-            "final_tester_name":"technician",
-            "final_company":    "company",
-            "final_cert":       "cert_no",
+            "init_tester_name":  "technician",
+            "init_company":      "company",
+            "init_cert":         "cert_no",
+            "final_tester_name": "technician",
+            "final_company":     "company",
+            "final_cert":        "cert_no",
         }
         for jk, pk in jax_map.items():
             if not form.get(jk):
@@ -1268,7 +1307,7 @@ def render_jax_tab():
             st.session_state["signature_b64"] = profile.get("signature_b64")
         st.session_state["_jax_tester_preloaded"] = True
 
-    st.subheader("📋 Jacksonville (JEA) — Backflow Test Report")
+    st.subheader("\U0001f4cb Jacksonville (JEA) \u2014 Backflow Test Report")
 
     synced_date_input(
         "Inspection Date",
@@ -1329,13 +1368,15 @@ def render_jax_tab():
         form["res_reclaim"] = st.selectbox("Res Reclaim Water", rrc_opts, index=rrc_idx, key="j_rrc")
 
     st.divider()
-    st.markdown("**Device Info**")
-    col_dt, col_mfg = st.columns(2)
+    st.markdown("**Assembly Info**")
+    col_dt, col_mfg, col_sz, col_mn = st.columns(4)
     with col_dt:
         clearable_input("Device Type", "jax_form", "device_type", "j_dt")
-        clearable_input("Manufacturer", "jax_form", "manufacturer", "j_mfg")
     with col_mfg:
+        clearable_input("Manufacturer", "jax_form", "manufacturer", "j_mfg")
+    with col_sz:
         clearable_input("Size", "jax_form", "size", "j_sz")
+    with col_mn:
         clearable_input("Model Number", "jax_form", "model_number", "j_mn")
 
     col_sn, col_id = st.columns(2)
@@ -1346,147 +1387,146 @@ def render_jax_tab():
 
     st.divider()
     st.markdown("**Initial Test**")
-
-    col_icv1a, col_icv1b = st.columns(2)
-    with col_icv1a:
+    col_icv1r, col_icv1p = st.columns(2)
+    with col_icv1r:
         icv1_opts = ["", "Closed Tight", "Leaked"]
         cur_icv1 = form.get("init_cv1_result", "")
         icv1_idx = icv1_opts.index(cur_icv1) if cur_icv1 in icv1_opts else 0
         form["init_cv1_result"] = st.selectbox("Init CV1", icv1_opts, index=icv1_idx, key="init_cv1_result")
-    with col_icv1b:
+    with col_icv1p:
         clearable_input("Init CV1 (psi)", "jax_form", "init_cv1_psi", "j_icv1p")
 
-    col_icv2a, col_icv2b = st.columns(2)
-    with col_icv2a:
+    col_icv2r, col_icv2p = st.columns(2)
+    with col_icv2r:
         icv2_opts = ["", "Closed Tight", "Leaked"]
         cur_icv2 = form.get("init_cv2_result", "")
         icv2_idx = icv2_opts.index(cur_icv2) if cur_icv2 in icv2_opts else 0
         form["init_cv2_result"] = st.selectbox("Init CV2", icv2_opts, index=icv2_idx, key="init_cv2_result")
-    with col_icv2b:
+    with col_icv2p:
         clearable_input("Init CV2 (psi)", "jax_form", "init_cv2_psi", "j_icv2p")
 
-    col_irva, col_irvb = st.columns(2)
-    with col_irva:
+    col_irvr, col_irvp = st.columns(2)
+    with col_irvr:
         irv_opts = ["", "Opened", "Did Not Open"]
         cur_irv = form.get("init_rv_result", "")
         irv_idx = irv_opts.index(cur_irv) if cur_irv in irv_opts else 0
         form["init_rv_result"] = st.selectbox("Init RV", irv_opts, index=irv_idx, key="init_rv_result")
-    with col_irvb:
+    with col_irvp:
         clearable_input("Init RV (psi)", "jax_form", "init_rv_psi", "j_irvp")
 
-    col_ipvba, col_ipvbb = st.columns(2)
-    with col_ipvba:
+    col_ipvbr, col_ipvbp = st.columns(2)
+    with col_ipvbr:
         ipvb_opts = ["", "Air Inlet Opened", "Air Inlet Did Not"]
         cur_ipvb = form.get("init_pvb_result", "")
         ipvb_idx = ipvb_opts.index(cur_ipvb) if cur_ipvb in ipvb_opts else 0
         form["init_pvb_result"] = st.selectbox("Init PVB", ipvb_opts, index=ipvb_idx, key="init_pvb_result")
-    with col_ipvbb:
+    with col_ipvbp:
         clearable_input("Init PVB (psi)", "jax_form", "init_pvb_psi", "j_ipvbp")
 
     st.divider()
     st.markdown("**Final Test**")
-
-    col_fcv1a, col_fcv1b = st.columns(2)
-    with col_fcv1a:
+    col_fcv1r, col_fcv1p = st.columns(2)
+    with col_fcv1r:
         fcv1_opts = ["", "Closed Tight", "Leaked"]
         cur_fcv1 = form.get("final_cv1_result", "")
         fcv1_idx = fcv1_opts.index(cur_fcv1) if cur_fcv1 in fcv1_opts else 0
         form["final_cv1_result"] = st.selectbox("Final CV1", fcv1_opts, index=fcv1_idx, key="final_cv1_result")
-    with col_fcv1b:
+    with col_fcv1p:
         clearable_input("Final CV1 (psi)", "jax_form", "final_cv1_psi", "j_fcv1p")
 
-    col_fcv2a, col_fcv2b = st.columns(2)
-    with col_fcv2a:
+    col_fcv2r, col_fcv2p = st.columns(2)
+    with col_fcv2r:
         fcv2_opts = ["", "Closed Tight", "Leaked"]
         cur_fcv2 = form.get("final_cv2_result", "")
         fcv2_idx = fcv2_opts.index(cur_fcv2) if cur_fcv2 in fcv2_opts else 0
         form["final_cv2_result"] = st.selectbox("Final CV2", fcv2_opts, index=fcv2_idx, key="final_cv2_result")
-    with col_fcv2b:
+    with col_fcv2p:
         clearable_input("Final CV2 (psi)", "jax_form", "final_cv2_psi", "j_fcv2p")
 
-    col_frva, col_frvb = st.columns(2)
-    with col_frva:
+    col_frvr, col_frvp = st.columns(2)
+    with col_frvr:
         frv_opts = ["", "Opened", "Did Not Open"]
         cur_frv = form.get("final_rv_result", "")
         frv_idx = frv_opts.index(cur_frv) if cur_frv in frv_opts else 0
         form["final_rv_result"] = st.selectbox("Final RV", frv_opts, index=frv_idx, key="final_rv_result")
-    with col_frvb:
+    with col_frvp:
         clearable_input("Final RV (psi)", "jax_form", "final_rv_psi", "j_frvp")
 
-    fpvb_opts = ["", "Satisfactory", "Unsatisfactory"]
-    cur_fpvb = form.get("final_pvb_result", "")
-    fpvb_idx = fpvb_opts.index(cur_fpvb) if cur_fpvb in fpvb_opts else 0
-    form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_idx, key="final_pvb_result")
+    col_fpvbr, _ = st.columns(2)
+    with col_fpvbr:
+        fpvb_opts = ["", "Satisfactory", "Unsatisfactory"]
+        cur_fpvb = form.get("final_pvb_result", "")
+        fpvb_idx = fpvb_opts.index(cur_fpvb) if cur_fpvb in fpvb_opts else 0
+        form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_idx, key="final_pvb_result")
 
     st.divider()
-    clearable_input("Repairs", "jax_form", "repairs", "j_rep")
+    ares_opts = ["", "PASSED", "FAILED"]
+    cur_ares = form.get("assembly_result", "")
+    ares_idx = ares_opts.index(cur_ares) if cur_ares in ares_opts else 0
+    form["assembly_result"] = st.selectbox("Assembly Result", ares_opts, index=ares_idx, key="j_ares")
 
-    ar_opts = ["", "PASSED", "FAILED"]
-    cur_ar = form.get("assembly_result", "")
-    ar_idx = ar_opts.index(cur_ar) if cur_ar in ar_opts else 0
-    form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_idx, key="j_ares")
+    clearable_input("Repairs / Notes", "jax_form", "repairs", "j_rep")
 
     st.divider()
     st.markdown("**Tester Info**")
-    col_ti1, col_ti2, col_ti3 = st.columns(3)
-    with col_ti1:
+    col_itn, col_ico, col_ic = st.columns(3)
+    with col_itn:
         clearable_input("Init Tester Name", "jax_form", "init_tester_name", "j_itn")
-        clearable_input("Init Company",     "jax_form", "init_company",     "j_ico")
-        clearable_input("Init Cert",        "jax_form", "init_cert",        "j_ic")
-        st.caption(f"Init Test Date: {form.get('init_test_date', '')}")
-    with col_ti2:
-        clearable_input("Repaired By",      "jax_form", "repaired_by",      "j_rb")
-        clearable_input("Repair Company",   "jax_form", "repair_company",   "j_rco")
-        clearable_input("Repair Cert",      "jax_form", "repair_cert",      "j_rc")
-        st.caption(f"Repair Date: {form.get('repair_date', '')}")
-    with col_ti3:
-        clearable_input("Final Tester Name","jax_form", "final_tester_name","j_ftn")
-        clearable_input("Final Company",    "jax_form", "final_company",    "j_fco")
-        clearable_input("Final Cert",       "jax_form", "final_cert",       "j_fc")
-        st.caption(f"Final Test Date: {form.get('final_test_date', '')}")
+    with col_ico:
+        clearable_input("Init Company", "jax_form", "init_company", "j_ico")
+    with col_ic:
+        clearable_input("Init Cert", "jax_form", "init_cert", "j_ic")
 
-    st.caption(f"Signature Date: {form.get('signature_date', '')}")
+    col_rb, col_rco, col_rc = st.columns(3)
+    with col_rb:
+        clearable_input("Repaired By", "jax_form", "repaired_by", "j_rb")
+    with col_rco:
+        clearable_input("Repair Company", "jax_form", "repair_company", "j_rco")
+    with col_rc:
+        clearable_input("Repair Cert", "jax_form", "repair_cert", "j_rc")
+
+    col_ftn, col_fco, col_fc = st.columns(3)
+    with col_ftn:
+        clearable_input("Final Tester Name", "jax_form", "final_tester_name", "j_ftn")
+    with col_fco:
+        clearable_input("Final Company", "jax_form", "final_company", "j_fco")
+    with col_fc:
+        clearable_input("Final Cert", "jax_form", "final_cert", "j_fc")
 
     st.divider()
-
-    col_gen, col_save = st.columns(2)
-    with col_gen:
-        if st.button("🖨️ Generate PDF", key="j_gen_pdf"):
+    col_jgen, col_jsave = st.columns(2)
+    with col_jgen:
+        if st.button("\U0001f5a8\ufe0f Generate PDF", key="j_gen_pdf"):
             try:
                 pdf_bytes = generate_jax_pdf(form)
                 fname = f"jax_{form.get('premises_name','report').replace(' ','_')}.pdf"
-                st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="j_dl_pdf")
-                for k in list(form.keys()):
-                    if k not in JAX_NEXT_REPORT_KEEP:
-                        form.pop(k, None)
-                for wk in JAX_GREEN_WIDGET_KEYS:
-                    st.session_state.pop(wk, None)
+                st.download_button("\U0001f4e5 Download PDF", pdf_bytes, fname, "application/pdf", key="j_dl_pdf")
             except Exception as e:
                 st.error(f"PDF error: {e}")
 
-    with col_save:
-        if st.button("💾 Save to Job Folder", key="j_save_job"):
+    with col_jsave:
+        if st.button("\U0001f4be Save to Job Folder", key="j_save_job"):
             if "job_folder" not in st.session_state:
                 st.session_state["job_folder"] = []
             st.session_state["job_folder"].append({
                 "form_type": "jax",
                 "form_data": dict(form),
-                "label": form.get("premises_name") or form.get("service_address") or "Report",
+                "label": form.get("premises_name") or form.get("service_address") or "JAX Report",
             })
             st.success(f"Saved! Job folder has {len(st.session_state['job_folder'])} report(s).")
 
     st.divider()
-    col_nr, col_nj = st.columns(2)
-    with col_nr:
-        if st.button("🔄 Next Report (same job)", key="j_next_report"):
+    col_jnr, col_jnj = st.columns(2)
+    with col_jnr:
+        if st.button("\U0001f504 Next Report (same job)", key="j_next_report"):
             keep = {k: v for k, v in form.items() if k in JAX_NEXT_REPORT_KEEP}
             st.session_state["jax_form"] = keep
             for wk in JAX_GREEN_WIDGET_KEYS:
                 st.session_state.pop(wk, None)
             st.session_state.pop("_jax_tester_preloaded", None)
             st.rerun()
-    with col_nj:
-        if st.button("🆕 New Job", key="j_new_job"):
+    with col_jnj:
+        if st.button("\U0001f195 New Job", key="j_new_job"):
             keep = {k: v for k, v in form.items() if k in JAX_NEW_JOB_KEEP}
             st.session_state["jax_form"] = keep
             for wk in JAX_GREEN_WIDGET_KEYS + JAX_BLUE_WIDGET_KEYS:
@@ -1500,94 +1540,58 @@ def render_jax_tab():
 # ===========================================================================
 
 def render_job_folder_tab():
-    st.subheader("📁 Job Folder")
+    st.subheader("\U0001f4c2 Job Folder")
 
     folder = st.session_state.get("job_folder", [])
-
     if not folder:
-        st.info("No reports saved yet. Use **Save to Job Folder** on either form tab.")
+        st.info("No reports saved yet. Use \"Save to Job Folder\" on either form tab.")
         return
 
-    st.write(f"**{len(folder)} report(s) in folder**")
-
+    st.write(f"**{len(folder)} report(s) in folder:**")
     for i, item in enumerate(folder):
         label = item.get("label", f"Report {i+1}")
-        ft    = item.get("form_type", "united")
-        fd    = item.get("form_data", {})
-
-        with st.expander(f"{i+1}. [{ft.upper()}] {label}"):
-            col_pdf, col_del = st.columns([3, 1])
-            with col_pdf:
-                if st.button("🖨️ Generate PDF", key=f"jf_pdf_{i}"):
-                    try:
-                        if ft == "jax":
-                            pdf_bytes = generate_jax_pdf(fd)
-                            fname = f"jax_{label.replace(' ','_')}.pdf"
-                        else:
-                            pdf_bytes = generate_united_pdf(fd)
-                            fname = f"backflow_{label.replace(' ','_')}.pdf"
-                        st.download_button("📥 Download", pdf_bytes, fname, "application/pdf", key=f"jf_dl_{i}")
-                    except Exception as e:
-                        st.error(f"PDF error: {e}")
-            with col_del:
-                if st.button("🗑️ Remove", key=f"jf_del_{i}"):
-                    st.session_state["job_folder"].pop(i)
-                    st.rerun()
+        ft = item.get("form_type", "united")
+        tag = "\U0001f534 JAX" if ft == "jax" else "\U0001f535 United"
+        st.write(f"{i+1}. {tag} — {label}")
 
     st.divider()
-    col_xl, col_clr = st.columns(2)
+    col_xl, col_cl = st.columns(2)
     with col_xl:
-        if st.button("📊 Export All to Excel", key="jf_export_xl"):
+        if st.button("\U0001f4ca Export to Excel", key="export_excel"):
             try:
-                xl_buf = export_jobs_to_excel(folder)
+                buf = export_jobs_to_excel(folder)
                 st.download_button(
-                    "📥 Download Excel",
-                    xl_buf,
-                    "backflow_reports.xlsx",
+                    "\U0001f4e5 Download Excel",
+                    buf,
+                    "job_folder.xlsx",
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="jf_dl_xl",
+                    key="dl_excel",
                 )
             except Exception as e:
-                st.error(f"Excel error: {e}")
-
-    with col_clr:
-        if st.button("🗑️ Clear All", key="jf_clear_all"):
+                st.error(f"Excel export error: {e}")
+    with col_cl:
+        if st.button("\U0001f5d1\ufe0f Clear Folder", key="clear_folder"):
             st.session_state["job_folder"] = []
             st.rerun()
 
-    if st.button("📦 Download All PDFs as ZIP", key="jf_zip"):
-        try:
-            zip_buf = BytesIO()
-            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for i, item in enumerate(folder):
-                    ft = item.get("form_type", "united")
-                    fd = item.get("form_data", {})
-                    lbl = item.get("label", f"report_{i+1}").replace(" ", "_")
-                    if ft == "jax":
-                        pdf_bytes = generate_jax_pdf(fd)
-                        zf.writestr(f"jax_{lbl}.pdf", pdf_bytes)
-                    else:
-                        pdf_bytes = generate_united_pdf(fd)
-                        zf.writestr(f"backflow_{lbl}.pdf", pdf_bytes)
-            zip_buf.seek(0)
-            st.download_button("📥 Download ZIP", zip_buf, "backflow_reports.zip", "application/zip", key="jf_dl_zip")
-        except Exception as e:
-            st.error(f"ZIP error: {e}")
-
 
 # ===========================================================================
-# Main
+# Main app
 # ===========================================================================
 
 def main():
-    st.set_page_config(page_title="Backflow Test Reporter", layout="wide")
+    st.set_page_config(
+        page_title="Backflow Test Reports",
+        page_icon="\U0001f4cb",
+        layout="wide",
+    )
 
     render_technician_sidebar()
 
     tab_united, tab_jax, tab_folder = st.tabs([
-        "🔵 United Fire",
-        "🟢 Jacksonville (JEA)",
-        "📁 Job Folder",
+        "\U0001f535 United Fire",
+        "\U0001f534 Jacksonville (JEA)",
+        "\U0001f4c2 Job Folder",
     ])
 
     with tab_united:

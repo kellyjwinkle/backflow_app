@@ -6,3 +6,4 @@ numpy>=2.0.0
 requests>=2.28.0
 openpyxl>=3.1.0
 supabase>=2.0.0
+streamlit-drawable-canvas>=0.9.3
