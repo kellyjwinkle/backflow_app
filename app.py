@@ -653,4 +653,30 @@ def _build_summary_sheet(wb, job_folder):
             passed_count += 1
         elif result == "FAILED":
             pf_cell.fill = PatternFill("solid", fgColor="FFC7CE")
-            pf_cell.font = Font(bold=True, color="9C0006
+            pf_cell.font = Font(bold=True, color="9C0006", size=10)
+            failed_count += 1
+        else:
+            pf_cell.fill = base_fill
+            pf_cell.font = Font(size=10)
+
+        ws.row_dimensions[i].height = 18
+
+    # Totals row
+    total_row = len(rows) + 2
+    ws.append(["", f"Total: {len(rows)}", f"✓ {passed_count}  ✗ {failed_count}"])
+    for col in range(1, 4):
+        cell = ws.cell(row=total_row, column=col)
+        cell.font = Font(bold=True, color="FFFFFF", size=10)
+        cell.fill = PatternFill("solid", fgColor="1F3864")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = Border(
+            left=Side(style="thin", color="AAAAAA"),
+            right=Side(style="thin", color="AAAAAA"),
+            top=Side(style="thin", color="AAAAAA"),
+            bottom=Side(style="thin", color="AAAAAA"),
+        )
+
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 14
+    ws.freeze_panes = "A2"
