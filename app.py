@@ -170,6 +170,28 @@ JAX_CHECKBOXES = {
     "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
 }
 
+# All widget keys used in the tester display panels — must be cleared when a profile loads
+# so Streamlit re-reads the value= param from the updated form dict instead of its cache.
+UNITED_TESTER_DISPLAY_KEYS = [
+    "u_gmfg_display", "u_gsn_display", "u_cal_display",
+    "u_tech_display", "u_cert_display", "u_recert_display",
+]
+JAX_TESTER_DISPLAY_KEYS = [
+    "j_itn_display", "j_ico_display", "j_ic_display",
+    "j_rb_display", "j_rco_display", "j_rc_display",
+    "j_ftn_display", "j_fco_display", "j_fc_display",
+]
+# Legacy editable widget keys (kept for backward compat clearing)
+UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
+JAX_TESTER_WIDGET_KEYS = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
+
+TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
+JAX_TESTER_MAP = {
+    "init_tester_name": "technician", "init_company": "company", "init_cert": "cert_no",
+    "repaired_by": "technician", "repair_company": "company", "repair_cert": "cert_no",
+    "final_tester_name": "technician", "final_company": "company", "final_cert": "cert_no",
+}
+
 
 def draw_x(c, bx, by, size=3.8):
     c.setStrokeColorRGB(1, 0, 0)
@@ -273,28 +295,23 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
     return picked
 
 
-TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
-UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
-JAX_TESTER_WIDGET_KEYS = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
-JAX_TESTER_MAP = {
-    "init_tester_name": "technician", "init_company": "company", "init_cert": "cert_no",
-    "repaired_by": "technician", "repair_company": "company", "repair_cert": "cert_no",
-    "final_tester_name": "technician", "final_company": "company", "final_cert": "cert_no",
-}
-
-
 def apply_profile_to_forms(profile: dict):
+    """Apply a technician profile dict to both form dicts and clear all stale widget keys."""
     if not profile:
         return
+
+    # Persist signature globally
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
 
+    # --- United form ---
     _init_form("united_form")
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
 
+    # --- JAX form ---
     _init_form("jax_form")
     jax = st.session_state["jax_form"]
     for jk, pk in JAX_TESTER_MAP.items():
@@ -303,7 +320,14 @@ def apply_profile_to_forms(profile: dict):
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
 
-    _clear_widget_keys(UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS)
+    # Clear ALL tester-related widget keys (both old editable keys and new display keys)
+    # so Streamlit re-reads value= from the updated form dict on the next render.
+    _clear_widget_keys(
+        UNITED_TESTER_WIDGET_KEYS
+        + JAX_TESTER_WIDGET_KEYS
+        + UNITED_TESTER_DISPLAY_KEYS
+        + JAX_TESTER_DISPLAY_KEYS
+    )
 
 
 def generate_united_pdf(form_data: dict) -> bytes:
@@ -584,6 +608,8 @@ def render_technician_sidebar():
 
 
 def render_tester_panel_united():
+    """Display-only tester/technician panel for the United form, populated from the loaded profile."""
+    _init_form("united_form")
     form = st.session_state["united_form"]
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
     st.divider()
@@ -609,6 +635,8 @@ def render_tester_panel_united():
 
 
 def render_tester_panel_jax():
+    """Display-only tester/technician panel for the JAX form, populated from the loaded profile."""
+    _init_form("jax_form")
     form = st.session_state["jax_form"]
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
     st.divider()
