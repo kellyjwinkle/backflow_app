@@ -931,12 +931,33 @@ def _init_form(key, defaults=None):
 
 
 # ===========================================================================
-# Sidebar — Technician profile
+# Sidebar — Technician profile (always visible, signature below fields)
 # ===========================================================================
 
-def render_technician_sidebar():
-    st.sidebar.title("👤 Technician Profile")
+def _apply_profile_to_forms(profile: dict):
+    """Push a loaded profile into both form dicts and clear widget state."""
+    jax_map = {
+        "init_tester_name": "technician",
+        "init_company":     "company",
+        "init_cert":        "cert_no",
+        "final_tester_name":"technician",
+        "final_company":    "company",
+        "final_cert":       "cert_no",
+    }
+    for form_key in ["united_form", "jax_form"]:
+        if form_key in st.session_state:
+            form = st.session_state[form_key]
+            for tk in TESTER_KEYS:
+                form[tk] = profile.get(tk, "")
+            for jk, pk in jax_map.items():
+                form[jk] = profile.get(pk, "")
+    _clear_tester_widget_state()
 
+
+def render_technician_sidebar():
+    st.sidebar.title("👤 Employee Profile")
+
+    # ── Technician selector ──────────────────────────────────────────────
     names = get_technician_names()
     prev_sel = st.session_state.get("_sidebar_tech_sel", "")
     if prev_sel not in names:
@@ -949,80 +970,95 @@ def render_technician_sidebar():
         key="sidebar_tech_select",
     )
 
+    # When selection changes, push profile into forms immediately
     if selected != prev_sel:
         st.session_state["_sidebar_tech_sel"] = selected
         profile = get_technician_profile(selected) if selected else {}
-        for key in ["united_form", "jax_form"]:
-            if key in st.session_state:
-                form = st.session_state[key]
-                for tk in TESTER_KEYS:
-                    form[tk] = profile.get(tk, "")
-                # JAX tester fields
-                jax_map = {
-                    "init_tester_name": "technician",
-                    "init_company":     "company",
-                    "init_cert":        "cert_no",
-                    "final_tester_name":"technician",
-                    "final_company":    "company",
-                    "final_cert":       "cert_no",
-                }
-                for jk, pk in jax_map.items():
-                    form[jk] = profile.get(pk, "")
-        _clear_tester_widget_state()
+        _apply_profile_to_forms(profile)
+        # Reset edit fields so they show the new profile
+        for k in ["_prof_name", "_prof_co", "_prof_cert", "_prof_rec",
+                  "_prof_gmfg", "_prof_gsn", "_prof_cal"]:
+            st.session_state.pop(k, None)
         st.rerun()
 
-    # Pre-populate on first load if a technician was already selected
+    # Pre-populate on first load
     if selected and "_sidebar_tech_populated" not in st.session_state:
         st.session_state["_sidebar_tech_populated"] = True
         profile = get_technician_profile(selected)
-        for key in ["united_form", "jax_form"]:
-            if key in st.session_state:
-                form = st.session_state[key]
-                for tk in TESTER_KEYS:
-                    form[tk] = profile.get(tk, "")
-                jax_map = {
-                    "init_tester_name": "technician",
-                    "init_company":     "company",
-                    "init_cert":        "cert_no",
-                    "final_tester_name":"technician",
-                    "final_company":    "company",
-                    "final_cert":       "cert_no",
-                }
-                for jk, pk in jax_map.items():
-                    form[jk] = profile.get(pk, "")
+        _apply_profile_to_forms(profile)
         _clear_tester_widget_state()
 
+    # ── Always-visible profile fields ───────────────────────────────────
+    profile = get_technician_profile(selected) if selected else {}
+
     st.sidebar.divider()
+    st.sidebar.markdown("**Profile Fields**")
 
-    with st.sidebar.expander("✏️ Edit / Add Profile", expanded=False):
-        prof_name = st.text_input("Name (key)", value=selected, key="prof_name")
-        prof_co   = st.text_input("Company",    value=get_technician_profile(selected).get("company", ""), key="prof_co")
-        prof_cert = st.text_input("Cert No.",   value=get_technician_profile(selected).get("cert_no", ""), key="prof_cert")
-        prof_rec  = st.text_input("Re-Cert",    value=get_technician_profile(selected).get("recert", ""),  key="prof_rec")
-        prof_gmfg = st.text_input("Gauge Mfg",  value=get_technician_profile(selected).get("gauge_mfg", ""), key="prof_gmfg")
-        prof_gsn  = st.text_input("Gauge SN",   value=get_technician_profile(selected).get("gauge_serial", ""), key="prof_gsn")
-        prof_cal  = st.text_input("Date Cal",   value=get_technician_profile(selected).get("date_cal", ""), key="prof_cal")
+    prof_name = st.sidebar.text_input("Name", value=profile.get("technician", selected), key="_prof_name")
+    prof_co   = st.sidebar.text_input("Company",   value=profile.get("company", ""),       key="_prof_co")
+    prof_cert = st.sidebar.text_input("Cert No.",  value=profile.get("cert_no", ""),       key="_prof_cert")
+    prof_rec  = st.sidebar.text_input("Re-Cert",   value=profile.get("recert", ""),        key="_prof_rec")
+    prof_gmfg = st.sidebar.text_input("Gauge Mfg", value=profile.get("gauge_mfg", ""),     key="_prof_gmfg")
+    prof_gsn  = st.sidebar.text_input("Gauge SN",  value=profile.get("gauge_serial", ""),  key="_prof_gsn")
+    prof_cal  = st.sidebar.text_input("Date Cal",  value=profile.get("date_cal", ""),      key="_prof_cal")
 
-        if st.button("💾 Save Profile", key="save_profile_btn"):
-            if prof_name.strip():
-                profile = {
-                    "technician":   prof_name.strip(),
-                    "company":      prof_co.strip(),
-                    "cert_no":      prof_cert.strip(),
-                    "recert":       prof_rec.strip(),
-                    "gauge_mfg":    prof_gmfg.strip(),
-                    "gauge_serial": prof_gsn.strip(),
-                    "date_cal":     prof_cal.strip(),
-                }
-                ok, msg = upsert_technician_profile(prof_name.strip(), profile)
-                if ok:
-                    st.success(msg)
-                else:
-                    st.warning(msg)
-                st.session_state["_sidebar_tech_sel"] = prof_name.strip()
-                st.rerun()
+    # ── Signature ────────────────────────────────────────────────────────
+    st.sidebar.divider()
+    st.sidebar.markdown("**Signature**")
+
+    sig_b64 = st.session_state.get("signature_b64")
+    if sig_b64:
+        st.sidebar.image(base64.b64decode(sig_b64), caption="Saved signature", use_container_width=True)
+        if st.sidebar.button("🗑️ Clear Signature", key="sb_clear_sig"):
+            clear_signature()
+            st.rerun()
+    else:
+        st.sidebar.caption("Draw your signature below:")
+
+    try:
+        from streamlit_drawable_canvas import st_canvas
+        canvas_result = st_canvas(
+            fill_color="rgba(255,255,255,0)",
+            stroke_width=2,
+            stroke_color="#000000",
+            background_color="#FFFFFF",
+            height=80,
+            width=220,
+            drawing_mode="freedraw",
+            key="sb_sig_canvas",
+        )
+        if canvas_result.image_data is not None:
+            arr = canvas_result.image_data
+            if arr.max() > 0 and arr[:, :, 3].max() > 0:
+                save_signature(arr)
+    except ImportError:
+        st.sidebar.info("Install streamlit-drawable-canvas for signature support.")
+
+    # ── Save button ──────────────────────────────────────────────────────
+    st.sidebar.divider()
+    if st.sidebar.button("💾 Save Profile", key="save_profile_btn", use_container_width=True):
+        name_key = (prof_name or "").strip()
+        if name_key:
+            new_profile = {
+                "technician":   name_key,
+                "company":      prof_co.strip(),
+                "cert_no":      prof_cert.strip(),
+                "recert":       prof_rec.strip(),
+                "gauge_mfg":    prof_gmfg.strip(),
+                "gauge_serial": prof_gsn.strip(),
+                "date_cal":     prof_cal.strip(),
+            }
+            ok, msg = upsert_technician_profile(name_key, new_profile)
+            if ok:
+                st.sidebar.success(msg)
             else:
-                st.error("Name cannot be empty.")
+                st.sidebar.warning(msg)
+            st.session_state["_sidebar_tech_sel"] = name_key
+            _apply_profile_to_forms(new_profile)
+            _clear_tester_widget_state()
+            st.rerun()
+        else:
+            st.sidebar.error("Name cannot be empty.")
 
 
 # ===========================================================================
@@ -1175,34 +1211,6 @@ def render_united_tab():
         clearable_input("Technician", "united_form", "technician", "u_tech")
         clearable_input("Cert No.", "united_form", "cert_no", "u_cert")
         clearable_input("Re-Cert Date", "united_form", "recert", "u_recert")
-
-    st.divider()
-    st.markdown("**Signature**")
-    sig_b64 = st.session_state.get("signature_b64")
-    if sig_b64:
-        st.image(base64.b64decode(sig_b64), caption="Current Signature", width=200)
-        if st.button("🗑️ Clear Signature", key="u_clear_sig"):
-            clear_signature()
-            st.rerun()
-
-    try:
-        from streamlit_drawable_canvas import st_canvas
-        canvas_result = st_canvas(
-            fill_color="rgba(255,255,255,0)",
-            stroke_width=2,
-            stroke_color="#000000",
-            background_color="#FFFFFF",
-            height=80,
-            width=300,
-            drawing_mode="freedraw",
-            key="u_sig_canvas",
-        )
-        if canvas_result.image_data is not None:
-            arr = canvas_result.image_data
-            if arr.max() > 0 and arr[:, :, 3].max() > 0:
-                save_signature(arr)
-    except ImportError:
-        st.info("Install streamlit-drawable-canvas for signature support.")
 
     st.divider()
 
@@ -1445,34 +1453,6 @@ def render_jax_tab():
         clearable_input("Final Test Date",  "jax_form", "final_test_date",  "j_ftd")
 
     clearable_input("Signature Date", "jax_form", "signature_date", "j_sd")
-
-    st.divider()
-    st.markdown("**Signature**")
-    sig_b64 = st.session_state.get("signature_b64")
-    if sig_b64:
-        st.image(base64.b64decode(sig_b64), caption="Current Signature", width=200)
-        if st.button("🗑️ Clear Signature", key="j_clear_sig"):
-            clear_signature()
-            st.rerun()
-
-    try:
-        from streamlit_drawable_canvas import st_canvas
-        canvas_result = st_canvas(
-            fill_color="rgba(255,255,255,0)",
-            stroke_width=2,
-            stroke_color="#000000",
-            background_color="#FFFFFF",
-            height=80,
-            width=300,
-            drawing_mode="freedraw",
-            key="j_sig_canvas",
-        )
-        if canvas_result.image_data is not None:
-            arr = canvas_result.image_data
-            if arr.max() > 0 and arr[:, :, 3].max() > 0:
-                save_signature(arr)
-    except ImportError:
-        st.info("Install streamlit-drawable-canvas for signature support.")
 
     st.divider()
 
