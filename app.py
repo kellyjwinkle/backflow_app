@@ -355,7 +355,7 @@ def wrap_text(text, w=58):
 
 
 # ---------------------------------------------------------------------------
-# Simplified inputs (no clear buttons)
+# Input helpers
 # ---------------------------------------------------------------------------
 
 def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
@@ -366,7 +366,7 @@ def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
         key=widget_key,
         **kwargs,
     )
-    form[field_key] = st.session_state.get(widget_key, "")
+    form[field_key] = val
     return val
 
 
@@ -382,7 +382,7 @@ def clearable_input(label, form_key, field_key, widget_key, **kwargs):
         key=widget_key,
         **kwargs,
     )
-    form[field_key] = st.session_state.get(widget_key, "")
+    form[field_key] = val
     return val
 
 
@@ -897,42 +897,46 @@ def generate_jax_pdf(form_data: dict) -> bytes:
 
 TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
 
-
-def _clear_tester_widget_state():
-    for wk in UNITED_TESTER_WIDGET_KEYS:
-        st.session_state.pop(wk, None)
-    for wk in JAX_TESTER_WIDGET_KEYS:
-        st.session_state.pop(wk, None)
+JAX_TESTER_MAP = {
+    "init_tester_name":  "technician",
+    "init_company":      "company",
+    "init_cert":         "cert_no",
+    "final_tester_name": "technician",
+    "final_company":     "company",
+    "final_cert":        "cert_no",
+}
 
 
 def apply_profile_to_forms(profile: dict):
-    """Central helper: push a technician profile into both active forms + signature."""
+    """Push a technician profile into both active forms + signature.
+
+    Key design principle: we write directly to the form dicts so the values
+    survive the next Streamlit render cycle.  We do NOT clear widget keys here
+    because clearable_input/tap_clear_input now read value= from the form dict
+    every render — clearing the keys would cause them to re-initialise to ""
+    and immediately overwrite what we just set.
+    """
     if not profile:
         return
 
+    # Load signature
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
 
-    for key in ["united_form", "jax_form"]:
-        if key not in st.session_state:
-            continue
-        form = st.session_state[key]
-        for tk in TESTER_KEYS:
-            form[tk] = profile.get(tk, "")
-        jax_map = {
-            "init_tester_name":  "technician",
-            "init_company":      "company",
-            "init_cert":         "cert_no",
-            "final_tester_name": "technician",
-            "final_company":     "company",
-            "final_cert":        "cert_no",
-        }
-        for jk, pk in jax_map.items():
-            form[jk] = profile.get(pk, "")
+    # United Fire form
+    _init_form("united_form")
+    united = st.session_state["united_form"]
+    for tk in TESTER_KEYS:
+        united[tk] = profile.get(tk, "")
 
-    _clear_tester_widget_state()
-    st.session_state.pop("_united_tester_preloaded", None)
-    st.session_state.pop("_jax_tester_preloaded", None)
+    # Jacksonville form
+    _init_form("jax_form")
+    jax = st.session_state["jax_form"]
+    for jk, pk in JAX_TESTER_MAP.items():
+        jax[jk] = profile.get(pk, "")
+    # also push gauge/recert fields into jax form for completeness
+    for tk in TESTER_KEYS:
+        jax[tk] = profile.get(tk, "")
 
 
 def _init_form(key, defaults=None):
@@ -961,25 +965,28 @@ def render_technician_sidebar():
 
     st.session_state["_sidebar_tech_sel"] = selected
 
-    # --- Load Selected Profile button ---
+    # Auto-load profile on first visit OR when selection changes
+    last_loaded = st.session_state.get("_last_loaded_tech", None)
+    if selected and selected != last_loaded:
+        profile = get_technician_profile(selected)
+        apply_profile_to_forms(profile)
+        st.session_state["_last_loaded_tech"] = selected
+
+    # Manual reload button (useful after editing a profile)
     if st.sidebar.button(
-        "\U0001f4e5 Load Selected Profile",
+        "\U0001f4e5 Reload Profile",
         key="load_profile_btn",
         disabled=not bool(selected),
     ):
         profile = get_technician_profile(selected)
         apply_profile_to_forms(profile)
-        st.sidebar.success(f"Loaded profile: {selected}")
+        st.session_state["_last_loaded_tech"] = selected
+        st.sidebar.success(f"Loaded: {selected}")
         st.rerun()
-
-    # Auto-populate on first load
-    if selected and "_sidebar_tech_populated" not in st.session_state:
-        st.session_state["_sidebar_tech_populated"] = True
-        profile = get_technician_profile(selected)
-        apply_profile_to_forms(profile)
 
     st.sidebar.divider()
 
+    # ── Edit / Add Profile ──────────────────────────────────────────────────
     with st.sidebar.expander("\u270f\ufe0f Edit / Add Profile", expanded=False):
         current = get_technician_profile(selected) if selected else {}
         prof_name = st.text_input("Name (key)", value=selected, key="prof_name")
@@ -996,7 +1003,7 @@ def render_technician_sidebar():
 
         if st.button("\U0001f4be Save Profile", key="save_profile_btn"):
             if prof_name.strip():
-                profile = {
+                new_profile = {
                     "technician":    prof_name.strip(),
                     "company":       prof_co.strip(),
                     "cert_no":       prof_cert.strip(),
@@ -1006,21 +1013,22 @@ def render_technician_sidebar():
                     "date_cal":      prof_cal.strip(),
                     "signature_b64": st.session_state.get("signature_b64", ""),
                 }
-                ok, msg = upsert_technician_profile(prof_name.strip(), profile)
+                ok, msg = upsert_technician_profile(prof_name.strip(), new_profile)
                 if ok:
                     st.success(msg)
                 else:
                     st.warning(msg)
                 st.session_state["_sidebar_tech_sel"] = prof_name.strip()
-                st.session_state.pop("_sidebar_tech_populated", None)
+                st.session_state["_last_loaded_tech"] = None  # force reload on next render
                 st.rerun()
             else:
                 st.error("Name cannot be empty.")
 
     st.sidebar.divider()
+
+    # ── Signature section ───────────────────────────────────────────────────
     st.sidebar.markdown("**Signature**")
 
-    # Show current saved signature
     sig_b64 = st.session_state.get("signature_b64")
     if sig_b64:
         st.sidebar.image(
@@ -1029,7 +1037,6 @@ def render_technician_sidebar():
             use_container_width=True,
         )
 
-    # Upload option
     upload = st.sidebar.file_uploader(
         "Upload signature (PNG preferred)",
         type=["png", "jpg", "jpeg"],
@@ -1045,7 +1052,6 @@ def render_technician_sidebar():
         except Exception as e:
             st.sidebar.error(f"Could not read uploaded signature: {e}")
 
-    # Draw option
     st.sidebar.caption("Or draw your signature below:")
     try:
         from streamlit_drawable_canvas import st_canvas
@@ -1066,7 +1072,6 @@ def render_technician_sidebar():
     except ImportError:
         st.sidebar.info("Install streamlit-drawable-canvas for signature support.")
 
-    # Action buttons
     col_sig1, col_sig2 = st.sidebar.columns(2)
     with col_sig1:
         if st.button("\U0001f5d1\ufe0f Clear Sig", key="sb_clear_sig"):
@@ -1084,22 +1089,92 @@ def render_technician_sidebar():
 
 
 # ===========================================================================
+# Tester info panel — rendered at the bottom of each form tab
+# ===========================================================================
+
+def render_tester_panel_united():
+    """Read-only display + editable fields showing the active technician data."""
+    form = st.session_state["united_form"]
+    selected_tech = st.session_state.get("_sidebar_tech_sel", "")
+
+    st.divider()
+    st.markdown("**🔧 Tester / Technician Info**")
+
+    if selected_tech:
+        st.caption(f"Profile loaded: **{selected_tech}** — edit in sidebar or update fields below.")
+    else:
+        st.caption("No profile selected. Select one in the sidebar or fill in manually.")
+
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        clearable_input("Gauge Mfg",       "united_form", "gauge_mfg",    "u_gmfg")
+        clearable_input("Gauge Serial",    "united_form", "gauge_serial", "u_gsn")
+        clearable_input("Date Calibrated", "united_form", "date_cal",     "u_cal")
+    with col_t2:
+        clearable_input("Technician",      "united_form", "technician",   "u_tech")
+        clearable_input("Cert No.",        "united_form", "cert_no",      "u_cert")
+        clearable_input("Re-Cert Date",    "united_form", "recert",       "u_recert")
+
+    # Show signature preview
+    sig_b64 = st.session_state.get("signature_b64")
+    if sig_b64:
+        st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
+    else:
+        st.caption("⚠️ No signature loaded. Upload or draw one in the sidebar.")
+
+
+def render_tester_panel_jax():
+    """Tester panel for Jacksonville form."""
+    form = st.session_state["jax_form"]
+    selected_tech = st.session_state.get("_sidebar_tech_sel", "")
+
+    st.divider()
+    st.markdown("**🔧 Tester / Technician Info**")
+
+    if selected_tech:
+        st.caption(f"Profile loaded: **{selected_tech}** — edit in sidebar or update fields below.")
+    else:
+        st.caption("No profile selected. Select one in the sidebar or fill in manually.")
+
+    col_itn, col_ico, col_ic = st.columns(3)
+    with col_itn:
+        clearable_input("Init Tester Name", "jax_form", "init_tester_name", "j_itn")
+    with col_ico:
+        clearable_input("Init Company",     "jax_form", "init_company",     "j_ico")
+    with col_ic:
+        clearable_input("Init Cert",        "jax_form", "init_cert",        "j_ic")
+
+    col_rb, col_rco, col_rc = st.columns(3)
+    with col_rb:
+        clearable_input("Repaired By",    "jax_form", "repaired_by",    "j_rb")
+    with col_rco:
+        clearable_input("Repair Company", "jax_form", "repair_company", "j_rco")
+    with col_rc:
+        clearable_input("Repair Cert",    "jax_form", "repair_cert",    "j_rc")
+
+    col_ftn, col_fco, col_fc = st.columns(3)
+    with col_ftn:
+        clearable_input("Final Tester Name", "jax_form", "final_tester_name", "j_ftn")
+    with col_fco:
+        clearable_input("Final Company",     "jax_form", "final_company",     "j_fco")
+    with col_fc:
+        clearable_input("Final Cert",        "jax_form", "final_cert",        "j_fc")
+
+    # Show signature preview
+    sig_b64 = st.session_state.get("signature_b64")
+    if sig_b64:
+        st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
+    else:
+        st.caption("⚠️ No signature loaded. Upload or draw one in the sidebar.")
+
+
+# ===========================================================================
 # United Fire tab
 # ===========================================================================
 
 def render_united_tab():
     _init_form("united_form")
     form = st.session_state["united_form"]
-
-    selected_tech = st.session_state.get("_sidebar_tech_sel", "")
-    if selected_tech and not st.session_state.get("_united_tester_preloaded"):
-        profile = get_technician_profile(selected_tech)
-        for tk in TESTER_KEYS:
-            if not form.get(tk):
-                form[tk] = profile.get(tk, "")
-        if profile.get("signature_b64") and not st.session_state.get("signature_b64"):
-            st.session_state["signature_b64"] = profile.get("signature_b64")
-        st.session_state["_united_tester_preloaded"] = True
 
     st.subheader("\U0001f4cb United Fire \u2014 Backflow Test Report")
 
@@ -1221,17 +1296,8 @@ def render_united_tab():
 
     clearable_input("Repair Description", "united_form", "repair_desc", "u_rep")
 
-    st.divider()
-    st.markdown("**Tester Info**")
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        clearable_input("Gauge Mfg", "united_form", "gauge_mfg", "u_gmfg")
-        clearable_input("Gauge Serial", "united_form", "gauge_serial", "u_gsn")
-        clearable_input("Date Calibrated", "united_form", "date_cal", "u_cal")
-    with col_t2:
-        clearable_input("Technician", "united_form", "technician", "u_tech")
-        clearable_input("Cert No.", "united_form", "cert_no", "u_cert")
-        clearable_input("Re-Cert Date", "united_form", "recert", "u_recert")
+    # Tester panel at the bottom
+    render_tester_panel_united()
 
     st.divider()
 
@@ -1268,7 +1334,6 @@ def render_united_tab():
             st.session_state["united_form"] = keep
             for wk in UNITED_GREEN_WIDGET_KEYS:
                 st.session_state.pop(wk, None)
-            st.session_state.pop("_united_tester_preloaded", None)
             st.rerun()
     with col_nj:
         if st.button("\U0001f195 New Job", key="u_new_job"):
@@ -1276,8 +1341,6 @@ def render_united_tab():
             st.session_state["united_form"] = keep
             for wk in UNITED_GREEN_WIDGET_KEYS + UNITED_BLUE_WIDGET_KEYS:
                 st.session_state.pop(wk, None)
-            reset_blue_focus_flags()
-            st.session_state.pop("_united_tester_preloaded", None)
             st.rerun()
 
 
@@ -1288,24 +1351,6 @@ def render_united_tab():
 def render_jax_tab():
     _init_form("jax_form")
     form = st.session_state["jax_form"]
-
-    selected_tech = st.session_state.get("_sidebar_tech_sel", "")
-    if selected_tech and not st.session_state.get("_jax_tester_preloaded"):
-        profile = get_technician_profile(selected_tech)
-        jax_map = {
-            "init_tester_name":  "technician",
-            "init_company":      "company",
-            "init_cert":         "cert_no",
-            "final_tester_name": "technician",
-            "final_company":     "company",
-            "final_cert":        "cert_no",
-        }
-        for jk, pk in jax_map.items():
-            if not form.get(jk):
-                form[jk] = profile.get(pk, "")
-        if profile.get("signature_b64") and not st.session_state.get("signature_b64"):
-            st.session_state["signature_b64"] = profile.get("signature_b64")
-        st.session_state["_jax_tester_preloaded"] = True
 
     st.subheader("\U0001f4cb Jacksonville (JEA) \u2014 Backflow Test Report")
 
@@ -1320,15 +1365,15 @@ def render_jax_tab():
     st.markdown("**Property Info**")
     col1, col2 = st.columns(2)
     with col1:
-        clearable_input("Premises Name", "jax_form", "premises_name", "j_prem")
-        clearable_input("Service Address", "jax_form", "service_address", "j_sa")
-        clearable_input("Physical Location", "jax_form", "physical_location", "j_pl")
-        clearable_input("JEA Account", "jax_form", "jea_account", "j_acct")
+        clearable_input("Premises Name",    "jax_form", "premises_name",    "j_prem")
+        clearable_input("Service Address",  "jax_form", "service_address",  "j_sa")
+        clearable_input("Physical Location","jax_form", "physical_location","j_pl")
+        clearable_input("JEA Account",      "jax_form", "jea_account",      "j_acct")
     with col2:
-        clearable_input("Owner Name", "jax_form", "owner_name", "j_own")
-        clearable_input("Mailing Address", "jax_form", "mailing_address", "j_ma")
-        clearable_input("Contact Phone", "jax_form", "contact_phone", "j_ph")
-        clearable_input("Meter Number", "jax_form", "meter_number", "j_meter")
+        clearable_input("Owner Name",       "jax_form", "owner_name",       "j_own")
+        clearable_input("Mailing Address",  "jax_form", "mailing_address",  "j_ma")
+        clearable_input("Contact Phone",    "jax_form", "contact_phone",    "j_ph")
+        clearable_input("Meter Number",     "jax_form", "meter_number",     "j_meter")
 
     st.divider()
     st.markdown("**Test Purpose & Service Type**")
@@ -1371,11 +1416,11 @@ def render_jax_tab():
     st.markdown("**Assembly Info**")
     col_dt, col_mfg, col_sz, col_mn = st.columns(4)
     with col_dt:
-        clearable_input("Device Type", "jax_form", "device_type", "j_dt")
+        clearable_input("Device Type",  "jax_form", "device_type",  "j_dt")
     with col_mfg:
         clearable_input("Manufacturer", "jax_form", "manufacturer", "j_mfg")
     with col_sz:
-        clearable_input("Size", "jax_form", "size", "j_sz")
+        clearable_input("Size",         "jax_form", "size",         "j_sz")
     with col_mn:
         clearable_input("Model Number", "jax_form", "model_number", "j_mn")
 
@@ -1383,7 +1428,7 @@ def render_jax_tab():
     with col_sn:
         clearable_input("Serial Number", "jax_form", "serial_number", "j_sn")
     with col_id:
-        clearable_input("Install Date", "jax_form", "install_date", "j_id")
+        clearable_input("Install Date",  "jax_form", "install_date",  "j_id")
 
     st.divider()
     st.markdown("**Initial Test**")
@@ -1467,31 +1512,8 @@ def render_jax_tab():
 
     clearable_input("Repairs / Notes", "jax_form", "repairs", "j_rep")
 
-    st.divider()
-    st.markdown("**Tester Info**")
-    col_itn, col_ico, col_ic = st.columns(3)
-    with col_itn:
-        clearable_input("Init Tester Name", "jax_form", "init_tester_name", "j_itn")
-    with col_ico:
-        clearable_input("Init Company", "jax_form", "init_company", "j_ico")
-    with col_ic:
-        clearable_input("Init Cert", "jax_form", "init_cert", "j_ic")
-
-    col_rb, col_rco, col_rc = st.columns(3)
-    with col_rb:
-        clearable_input("Repaired By", "jax_form", "repaired_by", "j_rb")
-    with col_rco:
-        clearable_input("Repair Company", "jax_form", "repair_company", "j_rco")
-    with col_rc:
-        clearable_input("Repair Cert", "jax_form", "repair_cert", "j_rc")
-
-    col_ftn, col_fco, col_fc = st.columns(3)
-    with col_ftn:
-        clearable_input("Final Tester Name", "jax_form", "final_tester_name", "j_ftn")
-    with col_fco:
-        clearable_input("Final Company", "jax_form", "final_company", "j_fco")
-    with col_fc:
-        clearable_input("Final Cert", "jax_form", "final_cert", "j_fc")
+    # Tester panel at the bottom
+    render_tester_panel_jax()
 
     st.divider()
     col_jgen, col_jsave = st.columns(2)
@@ -1523,7 +1545,6 @@ def render_jax_tab():
             st.session_state["jax_form"] = keep
             for wk in JAX_GREEN_WIDGET_KEYS:
                 st.session_state.pop(wk, None)
-            st.session_state.pop("_jax_tester_preloaded", None)
             st.rerun()
     with col_jnj:
         if st.button("\U0001f195 New Job", key="j_new_job"):
@@ -1531,7 +1552,6 @@ def render_jax_tab():
             st.session_state["jax_form"] = keep
             for wk in JAX_GREEN_WIDGET_KEYS + JAX_BLUE_WIDGET_KEYS:
                 st.session_state.pop(wk, None)
-            st.session_state.pop("_jax_tester_preloaded", None)
             st.rerun()
 
 
