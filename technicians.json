@@ -1,12 +1,13 @@
 {
   "Wes Winkle": {
     "technician": "Wes Winkle",
-    "company": "PYE BARKER",
-    "cert_no": "T-47040",
-    "recert": "4/17/28",
-    "gauge_mfg": "MID-WEST835",
-    "gauge_serial": "08182760",
-    "date_cal": "2/19/25"
+    "company": "",
+    "cert_no": "",
+    "recert": "",
+    "gauge_mfg": "",
+    "gauge_serial": "",
+    "date_cal": "",
+    "signature_b64": ""
   },
   "Technician 2": {
     "technician": "Technician 2",
