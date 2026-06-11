@@ -1135,7 +1135,7 @@ def render_technician_sidebar():
             except ImportError:
                 st.warning("`streamlit-drawable-canvas` not installed.")
 
-        if st.button("💾 Save Profile to Server", key="pe_save", use_container_width=True):
+        if st.button("💾 Save Profile to GitHub", key="pe_save", use_container_width=True):
             updated_profile = {
                 "technician":    new_name,
                 "cert_no":       new_cert,
@@ -1198,6 +1198,23 @@ def render_technician_sidebar():
 
 
 # ===========================================================================
+# Tester defaults (legacy shim — now profile-driven)
+# ===========================================================================
+
+def get_tester_defaults() -> dict:
+    """Return tester fields from active technician profile, or empty dict."""
+    active = st.session_state.get("active_technician", "")
+    if active:
+        return get_technician_profile(active)
+    return st.session_state.get("tester_defaults", {})
+
+
+def save_tester_defaults(form: dict):
+    """No-op shim kept for call-site compatibility."""
+    pass
+
+
+# ===========================================================================
 # App layout
 # ===========================================================================
 
@@ -1211,3 +1228,462 @@ render_job_folder_sidebar()
 st.title("🔧 Backflow Preventer Test Report")
 
 # --------------------------------------------------------------------------
+# Form selector
+# --------------------------------------------------------------------------
+
+form_choice = st.radio(
+    "Select form type",
+    ["United Fire (Standard)", "Jacksonville (JEA)"],
+    horizontal=True,
+    key="form_choice",
+)
+
+# ===========================================================================
+# UNITED FIRE FORM
+# ===========================================================================
+
+if form_choice == "United Fire (Standard)":
+
+    if "united_form" not in st.session_state:
+        defs = get_tester_defaults()
+        f0 = {k: defs.get(k, "") for k in TESTER_KEYS}
+        f0["date"] = date.today().strftime("%m/%d/%Y")
+        f0["test_date"] = date.today().strftime("%m/%d/%Y")
+        st.session_state.united_form = f0
+
+    f = st.session_state.united_form
+
+    # Always sync tester fields from active technician on first load
+    active = st.session_state.get("active_technician", "")
+    if active:
+        profile = get_technician_profile(active)
+        for k in TESTER_KEYS:
+            if not f.get(k) and profile.get(k):
+                f[k] = profile[k]
+
+    st.divider()
+    st.subheader("📋 Job Information")
+    r1c1, r1c2, r1c3 = st.columns([1, 1, 2])
+    with r1c1:
+        tap_clear_input("Date", "united_form", "date", "u_date")
+    with r1c2:
+        tap_clear_input("Branch", "united_form", "branch", "u_branch")
+    with r1c3:
+        tap_clear_input("Authority Having Jurisdiction", "united_form", "ahj", "u_ahj")
+    tap_clear_input("Customer / Site Name", "united_form", "customer_name", "u_cust")
+    tap_clear_input("Street Address", "united_form", "street_address", "u_addr")
+
+    clearable_input("Location of Assembly", "united_form", "location", "u_loc")
+
+    st.divider()
+    st.subheader("🔩 Backflow Assembly")
+
+    sn_col, sn_btn_col = st.columns([5, 1])
+    with sn_col:
+        sn_focus_flag = "u_sn_focused"
+        if st.session_state.get("u_sn_do_clear"):
+            f["serial_number"] = ""
+            st.session_state.pop("u_sn_do_clear", None)
+            st.session_state.pop("u_sn", None)
+        def _on_change_sn():
+            if not st.session_state.get(sn_focus_flag):
+                st.session_state["u_sn_do_clear"] = True
+                st.session_state[sn_focus_flag] = True
+        st.text_input(
+            "Serial Number",
+            value=f.get("serial_number", ""),
+            key="u_sn",
+            on_change=_on_change_sn,
+        )
+        f["serial_number"] = st.session_state.get("u_sn", "")
+    with sn_btn_col:
+        st.write("")
+        if st.button("✕", key="clr_u_sn", help="Clear Serial Number"):
+            f["serial_number"] = ""
+            st.session_state.pop("u_sn", None)
+            st.session_state.pop(sn_focus_flag, None)
+            st.rerun()
+
+    unable_to_read = st.checkbox(
+        "Unable to Read serial number",
+        value=(f.get("serial_number") == "Unable to Read"),
+        key="u_sn_unable",
+    )
+    if unable_to_read:
+        f["serial_number"] = "Unable to Read"
+        st.session_state["u_sn"] = "Unable to Read"
+
+    c2, c3, c4 = st.columns(3)
+    with c2:
+        tap_clear_input("Manufacturer ↺", "united_form", "manufacturer", "u_mfg")
+    with c3:
+        tap_clear_input("Model ↺", "united_form", "model", "u_mdl")
+    with c4:
+        tap_clear_input("Size ↺", "united_form", "size", "u_sz")
+
+    c1, c2, c3 = st.columns(3)
+    asm_opts = ["", "RP", "DC", "PVB", "SVB"]
+    f["assembly_type"] = c1.selectbox("Type of Assembly ↺", asm_opts,
+        index=asm_opts.index(f.get("assembly_type","")) if f.get("assembly_type","") in asm_opts else 0,
+        key="u_atype")
+    ss_opts = ["", "FIRE", "DOMESTIC", "IRRIGATION", "ATTRACTION"]
+    f["system_service"] = c2.selectbox("System Service ↺", ss_opts,
+        index=ss_opts.index(f.get("system_service","")) if f.get("system_service","") in ss_opts else 0,
+        key="u_ss")
+    bp_opts = ["", "YES", "NO"]
+    f["bypass"] = c3.selectbox("Bypass", bp_opts,
+        index=bp_opts.index(f.get("bypass","")) if f.get("bypass","") in bp_opts else 0,
+        key="u_bp")
+
+    st.divider()
+    st.subheader("🧪 Test Results")
+
+    show_rp  = f.get("assembly_type") in ("", "RP", "DC")
+    show_pvb = f.get("assembly_type") in ("", "PVB", "SVB")
+
+    if show_rp:
+        st.markdown("**Check Valves**")
+        cv_c1, cv_c2 = st.columns(2)
+        with cv_c1:
+            st.markdown("*CV #1*")
+            _radio("CV #1 Result", ["Closed Tight","Leaked"], "cv1_result", f, horizontal=True)
+            clearable_input("CV #1 Differential Pressure (psi)", "united_form", "cv1_dp", "u_cv1dp")
+        with cv_c2:
+            st.markdown("*CV #2*")
+            _radio("CV #2 Result", ["Closed Tight","Leaked"], "cv2_result", f, horizontal=True)
+            clearable_input("CV #2 Differential Pressure (psi)", "united_form", "cv2_dp", "u_cv2dp")
+
+        st.markdown("**Relief Valve**")
+        rv_c1, rv_c2, rv_c3 = st.columns(3)
+        with rv_c1:
+            _radio("RV Result", ["Opened At","Did Not Open"], "rv_result", f, horizontal=True)
+            clearable_input("RV Opened At (psi)", "united_form", "rv_psi", "u_rvpsi")
+        with rv_c2:
+            _radio("RV Outlet", ["Closed","Leaked"], "rv_out_result", f, horizontal=True)
+        with rv_c3:
+            _radio("RV Inlet", ["Closed","Leaked"], "rv_in_result", f, horizontal=True)
+
+    if show_pvb:
+        st.markdown("**PVB**")
+        pvb_c1, pvb_c2 = st.columns(2)
+        with pvb_c1:
+            _radio("Air Inlet", ["Closed Tight","Opened At"], "pvb_ai_result", f, horizontal=True)
+            clearable_input("Air Inlet Opened At (psi)", "united_form", "pvb_ai_psi", "u_aipsi")
+        with pvb_c2:
+            _radio("Check Valve", ["Leaked","Held At"], "pvb_cv_result", f, horizontal=True)
+            clearable_input("CV Held/Leaked At (psi)", "united_form", "pvb_cv_psi", "u_cvpsi")
+
+    st.divider()
+    clearable_input("Test Date", "united_form", "test_date", "u_tdate")
+
+    res_opts = ["", "PASSED", "FAILED"]
+    f["assembly_result"] = st.radio("Pass / Fail", res_opts,
+        index=res_opts.index(f.get("assembly_result","")) if f.get("assembly_result","") in res_opts else 0,
+        horizontal=True, format_func=lambda x: "—" if x=="" else x, key="u_res")
+
+    st.divider()
+    st.subheader("🔧 Repairs / Comments")
+    f["repair_desc"] = st.text_area("Repair description", f.get("repair_desc",""), height=80, key="u_rep")
+
+    st.divider()
+
+    with st.expander("🧰 Tester Info", expanded=False):
+        st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            clearable_input("Gauge Manufacturer", "united_form", "gauge_mfg", "u_gmfg")
+        with t2:
+            clearable_input("Gauge Serial #", "united_form", "gauge_serial", "u_gsn")
+        with t3:
+            clearable_input("Date Calibrated", "united_form", "date_cal", "u_cal")
+        t1b, t2b, t3b = st.columns(3)
+        with t1b:
+            clearable_input("Technician", "united_form", "technician", "u_tech")
+        with t2b:
+            clearable_input("Certification No.", "united_form", "cert_no", "u_cert")
+        with t3b:
+            clearable_input("Re-Cert Due Date", "united_form", "recert", "u_recert")
+
+    st.divider()
+
+    if st.button("📄 Generate PDF", type="primary", use_container_width=True, key="u_gen"):
+        with st.spinner("Building PDF..."):
+            try:
+                save_tester_defaults(f)
+                pdf_bytes = generate_united_pdf(f)
+                fname = safe_filename(f.get("customer_name",""), f.get("street_address",""), f.get("location",""))
+                add_to_job_folder(pdf_bytes, fname, dict(f), "united")
+                deliver_pdf(pdf_bytes, fname)
+                st.success(f"✅ PDF ready: {fname} | Added to Job Folder ({len(st.session_state.job_folder)} total)")
+
+                # Clear green fields
+                for green_key in UNITED_GREEN:
+                    f[green_key] = ""
+                for wk in UNITED_GREEN_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
+                reset_blue_focus_flags()
+                st.session_state["u_show_next_action"] = True
+            except Exception as e:
+                st.error(f"Error generating PDF: {e}")
+
+    if st.session_state.get("u_show_next_action"):
+        st.divider()
+        st.markdown("**What would you like to do next?**")
+        na1, na2, na3 = st.columns(3)
+        with na1:
+            if st.button("➡️ Next Report (same job)", use_container_width=True, key="u_next_post"):
+                kept = {k: f.get(k, "") for k in UNITED_NEXT_REPORT_KEEP}
+                kept["date"] = date.today().strftime("%m/%d/%Y")
+                kept["test_date"] = date.today().strftime("%m/%d/%Y")
+                save_tester_defaults(f)
+                st.session_state.united_form = kept
+                reset_blue_focus_flags()
+                st.session_state.pop("u_show_next_action", None)
+                for wk in UNITED_BLUE_WIDGET_KEYS + UNITED_GREEN_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
+                st.rerun()
+        with na2:
+            if st.button("🆕 New Job", use_container_width=True, key="u_newjob_post"):
+                kept = {k: f.get(k, "") for k in UNITED_NEW_JOB_KEEP}
+                kept["date"] = date.today().strftime("%m/%d/%Y")
+                kept["test_date"] = date.today().strftime("%m/%d/%Y")
+                save_tester_defaults(f)
+                st.session_state.united_form = kept
+                reset_blue_focus_flags()
+                st.session_state.pop("u_show_next_action", None)
+                for wk in UNITED_BLUE_WIDGET_KEYS + UNITED_GREEN_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
+                st.rerun()
+        with na3:
+            if st.button("↩️ Stay on this report", use_container_width=True, key="u_stay_post"):
+                st.session_state.pop("u_show_next_action", None)
+                st.rerun()
+
+# ===========================================================================
+# JACKSONVILLE (JEA) FORM
+# ===========================================================================
+
+else:
+    if "jax_form" not in st.session_state:
+        defs = get_tester_defaults()
+        f0 = {}
+        f0["init_tester_name"] = defs.get("technician", "")
+        f0["init_cert"]        = defs.get("cert_no", "")
+        f0["final_tester_name"] = defs.get("technician", "")
+        f0["final_cert"]       = defs.get("cert_no", "")
+        st.session_state.jax_form = f0
+
+    f = st.session_state.jax_form
+
+    # Sync tester fields from active technician on first load
+    active = st.session_state.get("active_technician", "")
+    if active:
+        profile = get_technician_profile(active)
+        jax_tech_map = {
+            "init_tester_name": "technician",
+            "init_cert": "cert_no",
+            "final_tester_name": "technician",
+            "final_cert": "cert_no",
+        }
+        for form_key, profile_key in jax_tech_map.items():
+            if not f.get(form_key) and profile.get(profile_key):
+                f[form_key] = profile[profile_key]
+
+    st.divider()
+    st.subheader("🏠 Property Information")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        clearable_input("Premises Name", "jax_form", "premises_name", "j_prem")
+        clearable_input("Service Address", "jax_form", "service_address", "j_sa")
+        clearable_input("Physical Location of Device", "jax_form", "physical_location", "j_pl")
+        clearable_input("JEA Account #", "jax_form", "jea_account", "j_acct")
+    with col2:
+        clearable_input("Owner Name", "jax_form", "owner_name", "j_own")
+        clearable_input("Mailing Address", "jax_form", "mailing_address", "j_ma")
+        clearable_input("Contact Phone", "jax_form", "contact_phone", "j_ph")
+        clearable_input("Meter Number", "jax_form", "meter_number", "j_meter")
+
+    st.divider()
+    st.subheader("📋 Test Purpose & Service Type")
+
+    tc1, tc2 = st.columns(2)
+    with tc1:
+        st.markdown("**Commercial**")
+        ctp_opts = ["", "Annual", "Repair", "Replacement", "New Installation"]
+        f["comm_test_purpose"] = st.selectbox("Test Purpose", ctp_opts,
+            index=ctp_opts.index(f.get("comm_test_purpose","")) if f.get("comm_test_purpose","") in ctp_opts else 0,
+            key="j_ctp")
+        cst_opts = ["", "Fire", "Irrigation", "Process/Isolation", "Potable", "Fire bypass"]
+        f["comm_service_type"] = st.selectbox("Service Type", cst_opts,
+            index=cst_opts.index(f.get("comm_service_type","")) if f.get("comm_service_type","") in cst_opts else 0,
+            key="j_cst")
+        crc_opts = ["", "Yes", "No"]
+        f["comm_reclaim"] = st.selectbox("Reclaimed Water", crc_opts,
+            index=crc_opts.index(f.get("comm_reclaim","")) if f.get("comm_reclaim","") in crc_opts else 0,
+            key="j_crc")
+    with tc2:
+        st.markdown("**Residential**")
+        rtp_opts = ["", "Annual", "Repair", "Replacement", "New Installation"]
+        f["res_test_purpose"] = st.selectbox("Test Purpose ", rtp_opts,
+            index=rtp_opts.index(f.get("res_test_purpose","")) if f.get("res_test_purpose","") in rtp_opts else 0,
+            key="j_rtp")
+        rst_opts = ["", "Potable", "Irrigation / Is reclaimed"]
+        f["res_service_type"] = st.selectbox("Service Type ", rst_opts,
+            index=rst_opts.index(f.get("res_service_type","")) if f.get("res_service_type","") in rst_opts else 0,
+            key="j_rst")
+        rrc_opts = ["", "Yes", "No"]
+        f["res_reclaim"] = st.selectbox("Reclaimed Water ", rrc_opts,
+            index=rrc_opts.index(f.get("res_reclaim","")) if f.get("res_reclaim","") in rrc_opts else 0,
+            key="j_rrc")
+
+    st.divider()
+    st.subheader("🔩 Device Information")
+
+    dc1, dc2, dc3, dc4 = st.columns(4)
+    with dc1:
+        clearable_input("Device Type", "jax_form", "device_type", "j_dt")
+    with dc2:
+        clearable_input("Manufacturer ↺", "jax_form", "manufacturer", "j_mfg")
+    with dc3:
+        clearable_input("Size ↺", "jax_form", "size", "j_sz")
+    with dc4:
+        clearable_input("Model Number ↺", "jax_form", "model_number", "j_mn")
+
+    dc5, dc6 = st.columns(2)
+    with dc5:
+        clearable_input("Serial Number", "jax_form", "serial_number", "j_sn")
+    with dc6:
+        clearable_input("Install Date", "jax_form", "install_date", "j_id")
+
+    st.divider()
+    st.subheader("🧪 Initial Test Results")
+
+    ic1, ic2 = st.columns(2)
+    with ic1:
+        _radio("CV #1", ["Closed Tight"], "init_cv1_result", f, horizontal=True)
+        clearable_input("CV #1 (psi)", "jax_form", "init_cv1_psi", "j_icv1p")
+        _radio("CV #2", ["Closed Tight"], "init_cv2_result", f, horizontal=True)
+        clearable_input("CV #2 (psi)", "jax_form", "init_cv2_psi", "j_icv2p")
+    with ic2:
+        _radio("Relief Valve", ["Opened At", "Did Not Open"], "init_rv_result", f, horizontal=True)
+        clearable_input("RV (psi)", "jax_form", "init_rv_psi", "j_irvp")
+        _radio("PVB", ["Air inlet opened at", "Did not open"], "init_pvb_result", f, horizontal=True)
+        clearable_input("PVB (psi)", "jax_form", "init_pvb_psi", "j_ipvbp")
+
+    clearable_input("Initial Test Date", "jax_form", "init_test_date", "j_itd")
+
+    st.divider()
+    st.subheader("🔧 Repairs")
+    f["repairs"] = st.text_area("Repair description", f.get("repairs",""), height=60, key="j_rep")
+
+    col_rb1, col_rb2, col_rb3, col_rb4 = st.columns(4)
+    with col_rb1:
+        clearable_input("Repaired By", "jax_form", "repaired_by", "j_rb")
+    with col_rb2:
+        clearable_input("Repair Company", "jax_form", "repair_company", "j_rco")
+    with col_rb3:
+        clearable_input("Repair Cert #", "jax_form", "repair_cert", "j_rc")
+    with col_rb4:
+        clearable_input("Repair Date", "jax_form", "repair_date", "j_rd")
+
+    st.divider()
+    st.subheader("✅ Final Test Results")
+
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        _radio("CV #1 Final", ["Closed Tight"], "final_cv1_result", f, horizontal=True)
+        clearable_input("CV #1 Final (psi)", "jax_form", "final_cv1_psi", "j_fcv1p")
+        _radio("CV #2 Final", ["Closed Tight"], "final_cv2_result", f, horizontal=True)
+        clearable_input("CV #2 Final (psi)", "jax_form", "final_cv2_psi", "j_fcv2p")
+    with fc2:
+        _radio("RV Final", ["Opened At"], "final_rv_result", f, horizontal=True)
+        clearable_input("RV Final (psi)", "jax_form", "final_rv_psi", "j_frvp")
+        _radio("PVB Final", ["Satisfactory"], "final_pvb_result", f, horizontal=True)
+
+    clearable_input("Final Test Date", "jax_form", "final_test_date", "j_ftd2")
+
+    res_opts = ["", "PASSED", "FAILED"]
+    f["assembly_result"] = st.radio("Pass / Fail", res_opts,
+        index=res_opts.index(f.get("assembly_result","")) if f.get("assembly_result","") in res_opts else 0,
+        horizontal=True, format_func=lambda x: "—" if x=="" else x, key="j_ares")
+
+    clearable_input("Signature Date", "jax_form", "signature_date", "j_sd")
+
+    st.divider()
+
+    with st.expander("🧰 Tester Info", expanded=False):
+        st.caption("Loaded from your technician profile. Edit profile in the sidebar to update.")
+        jt1, jt2, jt3, jt4 = st.columns(4)
+        with jt1:
+            clearable_input("Initial Tester Name", "jax_form", "init_tester_name", "j_itn")
+        with jt2:
+            clearable_input("Company", "jax_form", "init_company", "j_ico")
+        with jt3:
+            clearable_input("Cert #", "jax_form", "init_cert", "j_ic")
+        with jt4:
+            clearable_input("Test Date", "jax_form", "init_test_date", "j_itd2")
+
+        jt5, jt6, jt7, jt8 = st.columns(4)
+        with jt5:
+            clearable_input("Final Tester Name", "jax_form", "final_tester_name", "j_ftn")
+        with jt6:
+            clearable_input("Company ", "jax_form", "final_company", "j_fco")
+        with jt7:
+            clearable_input("Cert # ", "jax_form", "final_cert", "j_fc")
+        with jt8:
+            clearable_input("Final Test Date", "jax_form", "final_test_date", "j_ftd2b")
+
+    st.divider()
+
+    if st.button("📄 Generate PDF", type="primary", use_container_width=True, key="j_gen"):
+        with st.spinner("Building PDF..."):
+            try:
+                pdf_bytes = generate_jax_pdf(f)
+                fname = safe_filename(
+                    f.get("premises_name",""), f.get("service_address",""),
+                    f.get("physical_location",""), prefix="JAX"
+                )
+                add_to_job_folder(pdf_bytes, fname, dict(f), "jax")
+                deliver_pdf(pdf_bytes, fname)
+                st.success(f"✅ PDF ready: {fname} | Added to Job Folder ({len(st.session_state.job_folder)} total)")
+
+                # Clear green fields
+                for gk in JAX_GREEN_WIDGET_KEYS:
+                    st.session_state.pop(gk, None)
+                for gk in ["serial_number","install_date","init_cv1_psi","init_cv2_psi",
+                            "init_rv_psi","init_pvb_psi","init_test_date",
+                            "final_cv1_psi","final_cv2_psi","final_rv_psi",
+                            "repairs","signature_date","assembly_result",
+                            "init_cv1_result","init_cv2_result","init_rv_result","init_pvb_result",
+                            "final_cv1_result","final_cv2_result","final_rv_result","final_pvb_result"]:
+                    f.pop(gk, None)
+
+                st.session_state["j_show_next_action"] = True
+            except Exception as e:
+                st.error(f"Error generating PDF: {e}")
+
+    if st.session_state.get("j_show_next_action"):
+        st.divider()
+        st.markdown("**What would you like to do next?**")
+        jn1, jn2, jn3 = st.columns(3)
+        with jn1:
+            if st.button("➡️ Next Report (same job)", use_container_width=True, key="j_next_post"):
+                kept = {k: f.get(k, "") for k in JAX_NEXT_REPORT_KEEP}
+                st.session_state.jax_form = kept
+                st.session_state.pop("j_show_next_action", None)
+                for wk in JAX_BLUE_WIDGET_KEYS + JAX_GREEN_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
+                st.rerun()
+        with jn2:
+            if st.button("🆕 New Job", use_container_width=True, key="j_newjob_post"):
+                kept = {k: f.get(k, "") for k in JAX_NEW_JOB_KEEP}
+                st.session_state.jax_form = kept
+                st.session_state.pop("j_show_next_action", None)
+                for wk in JAX_BLUE_WIDGET_KEYS + JAX_GREEN_WIDGET_KEYS:
+                    st.session_state.pop(wk, None)
+                st.rerun()
+        with jn3:
+            if st.button("↩️ Stay on this report", use_container_width=True, key="j_stay_post"):
+                st.session_state.pop("j_show_next_action", None)
+                st.rerun()
