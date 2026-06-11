@@ -969,7 +969,7 @@ def render_technician_sidebar():
     ):
         profile = get_technician_profile(selected)
         apply_profile_to_forms(profile)
-        st.sidebar.success(f"Loaded: {selected}")
+        st.sidebar.success(f"Loaded profile: {selected}")
         st.rerun()
 
     # Auto-populate on first load
@@ -1073,7 +1073,7 @@ def render_technician_sidebar():
             clear_signature()
             st.rerun()
     with col_sig2:
-        if selected and st.button("\U0001f4be Save Sig", key="save_sig_to_profile"):
+        if selected and st.button("\U0001f4be Save Sig to Profile", key="save_sig_to_profile"):
             current = get_technician_profile(selected)
             current["signature_b64"] = st.session_state.get("signature_b64", "")
             ok, msg = upsert_technician_profile(selected, current)
