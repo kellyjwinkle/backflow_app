@@ -4,7 +4,7 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 import json, os, re, base64, tempfile, zipfile, requests
-from datetime import date
+from datetime import date, datetime
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ContentStream
 from PIL import Image
@@ -195,20 +195,17 @@ UNITED_GREEN = {
 UNITED_NEXT_REPORT_KEEP = UNITED_YELLOW | UNITED_BLUE
 UNITED_NEW_JOB_KEEP = UNITED_YELLOW
 
-# Widget keys that correspond to GREEN fields (need session state cleared after PDF)
 UNITED_GREEN_WIDGET_KEYS = [
     "u_loc", "u_cv1dp", "u_cv2dp", "u_rvpsi", "u_aipsi", "u_cvpsi",
-    "u_tdate", "u_rep",
+    "u_rep",
     "cv1_result", "cv2_result", "rv_result", "rv_out_result",
     "rv_in_result", "pvb_ai_result", "pvb_cv_result", "assembly_result",
 ]
 
-# Widget keys that correspond to YELLOW (tester) fields
 UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
 
-# Widget keys that correspond to BLUE fields
 UNITED_BLUE_WIDGET_KEYS = [
-    "u_date", "u_branch", "u_ahj", "u_cust", "u_addr",
+    "u_branch", "u_ahj", "u_cust", "u_addr",
     "u_sn", "u_mfg", "u_mdl", "u_sz",
 ]
 
@@ -297,6 +294,7 @@ JAX_NEXT_REPORT_KEEP = {
     "manufacturer", "model_number", "size", "device_type",
     "init_tester_name", "init_company", "init_cert",
     "final_tester_name", "final_company", "final_cert",
+    "signature_date", "init_test_date", "final_test_date", "repair_date",
 }
 JAX_NEW_JOB_KEEP = {
     "init_tester_name", "init_company", "init_cert",
@@ -307,7 +305,7 @@ JAX_GREEN_WIDGET_KEYS = [
     "j_sn", "j_id",
     "j_icv1p", "j_icv2p", "j_irvp", "j_ipvbp",
     "j_fcv1p", "j_fcv2p", "j_frvp",
-    "j_rep", "j_sd", "j_ares",
+    "j_rep", "j_ares",
     "init_cv1_result", "init_cv2_result", "init_rv_result", "init_pvb_result",
     "final_cv1_result", "final_cv2_result", "final_rv_result", "final_pvb_result",
     "assembly_result",
@@ -318,9 +316,9 @@ JAX_BLUE_WIDGET_KEYS = [
     "j_ctp", "j_cst", "j_crc", "j_rtp", "j_rst", "j_rrc",
 ]
 JAX_TESTER_WIDGET_KEYS = [
-    "j_itn", "j_ico", "j_ic", "j_itd",
-    "j_rb", "j_rco", "j_rc", "j_rd",
-    "j_ftn", "j_fco", "j_fc", "j_ftd",
+    "j_itn", "j_ico", "j_ic",
+    "j_rb", "j_rco", "j_rc",
+    "j_ftn", "j_fco", "j_fc",
 ]
 
 # ---------------------------------------------------------------------------
@@ -357,75 +355,34 @@ def wrap_text(text, w=58):
 
 
 # ---------------------------------------------------------------------------
-# Tap-to-clear input helper  (BLUE fields)
+# Simplified inputs (no clear buttons)
 # ---------------------------------------------------------------------------
 
 def tap_clear_input(label, form_key, field_key, widget_key, **kwargs):
     form = st.session_state[form_key]
-    focus_flag = f"{widget_key}_focused"
-
-    if st.session_state.get(f"{widget_key}_do_clear"):
-        form[field_key] = ""
-        st.session_state.pop(f"{widget_key}_do_clear", None)
-        st.session_state.pop(widget_key, None)
-
-    def _on_change():
-        if not st.session_state.get(focus_flag):
-            st.session_state[f"{widget_key}_do_clear"] = True
-            st.session_state[focus_flag] = True
-
-    col_input, col_btn = st.columns([5, 1])
-    with col_input:
-        val = st.text_input(
-            label,
-            value=form.get(field_key, ""),
-            key=widget_key,
-            on_change=_on_change,
-            **kwargs,
-        )
-        form[field_key] = st.session_state.get(widget_key, "")
-
-    with col_btn:
-        st.write("")
-        if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
-            form[field_key] = ""
-            st.session_state.pop(widget_key, None)
-            st.session_state.pop(focus_flag, None)
-            st.rerun()
-
+    val = st.text_input(
+        label,
+        value=form.get(field_key, ""),
+        key=widget_key,
+        **kwargs,
+    )
+    form[field_key] = st.session_state.get(widget_key, "")
     return val
 
 
 def reset_blue_focus_flags():
-    for wk in UNITED_BLUE_WIDGET_KEYS:
-        st.session_state.pop(f"{wk}_focused", None)
-        st.session_state.pop(f"{wk}_do_clear", None)
+    return
 
-
-# ---------------------------------------------------------------------------
-# Standard clearable input (GREEN / YELLOW fields)
-# ---------------------------------------------------------------------------
 
 def clearable_input(label, form_key, field_key, widget_key, **kwargs):
     form = st.session_state[form_key]
-
-    col_input, col_btn = st.columns([5, 1])
-    with col_input:
-        val = st.text_input(
-            label,
-            value=form.get(field_key, ""),
-            key=widget_key,
-            **kwargs,
-        )
-        form[field_key] = st.session_state.get(widget_key, "")
-
-    with col_btn:
-        st.write("")
-        if st.button("✕", key=f"clr_{widget_key}", help=f"Clear {label}"):
-            st.session_state[form_key][field_key] = ""
-            st.session_state.pop(widget_key, None)
-            st.rerun()
-
+    val = st.text_input(
+        label,
+        value=form.get(field_key, ""),
+        key=widget_key,
+        **kwargs,
+    )
+    form[field_key] = st.session_state.get(widget_key, "")
     return val
 
 
@@ -456,6 +413,37 @@ def save_signature(img_array):
     b64 = base64.b64encode(buf.getvalue()).decode()
     st.session_state["signature_b64"] = b64
     return b64
+
+
+def _date_to_string(value):
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.strftime("%m/%d/%Y")
+    return str(value)
+
+
+def synced_date_input(label, form_key, source_key, widget_key, target_fields):
+    form = st.session_state[form_key]
+    current = form.get(source_key, "")
+    default_date = date.today()
+
+    if current:
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                default_date = datetime.strptime(str(current), fmt).date()
+                break
+            except Exception:
+                pass
+
+    picked = st.date_input(label, value=default_date, key=widget_key)
+    picked_str = _date_to_string(picked)
+    form[source_key] = picked_str
+    for field in target_fields:
+        form[field] = picked_str
+    return picked
 
 
 # ===========================================================================
@@ -731,11 +719,9 @@ def generate_united_pdf(form_data: dict) -> bytes:
     packet = BytesIO()
     c = canvas.Canvas(packet, pagesize=(PAGE_W, PAGE_H))
 
-    # Text fields
     for field, (x, y, sz) in UNITED_TEXT_FIELDS.items():
         put_text(c, form_data.get(field, ""), x, y, sz)
 
-    # Checkboxes
     atype = form_data.get("assembly_type", "")
     if atype == "RP":   draw_x(c, *UNITED_CHECKBOXES["RP"])
     elif atype == "DC": draw_x(c, *UNITED_CHECKBOXES["DC"])
@@ -784,7 +770,6 @@ def generate_united_pdf(form_data: dict) -> bytes:
     if ar == "PASSED":  draw_x(c, *UNITED_CHECKBOXES["PASSED"])
     elif ar == "FAILED":draw_x(c, *UNITED_CHECKBOXES["FAILED"])
 
-    # Repair description
     repair = form_data.get("repair_desc", "")
     if repair:
         bx, by, bh, bl, bw = UNITED_REPAIR_BOX
@@ -794,7 +779,6 @@ def generate_united_pdf(form_data: dict) -> bytes:
         for i, ln in enumerate(lines[:bl]):
             c.drawString(bx, by - i * bh, ln)
 
-    # Signature
     sig_reader = get_signature_image_reader()
     if sig_reader:
         c.drawImage(sig_reader, UNITED_SIG_X, UNITED_SIG_Y,
@@ -826,10 +810,6 @@ def generate_jax_pdf(form_data: dict) -> bytes:
 
     for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
         put_text(c, form_data.get(field, ""), x, y, sz)
-
-    def _chk(key):
-        if form_data.get(key):
-            draw_x(c, *JAX_CHECKBOXES[key])
 
     comm_tp = form_data.get("comm_test_purpose", "")
     if comm_tp == "Annual":          draw_x(c, *JAX_CHECKBOXES["COMM_ANNUAL"])
@@ -931,33 +911,12 @@ def _init_form(key, defaults=None):
 
 
 # ===========================================================================
-# Sidebar — Technician profile (always visible, signature below fields)
+# Sidebar — Technician profile
 # ===========================================================================
 
-def _apply_profile_to_forms(profile: dict):
-    """Push a loaded profile into both form dicts and clear widget state."""
-    jax_map = {
-        "init_tester_name": "technician",
-        "init_company":     "company",
-        "init_cert":        "cert_no",
-        "final_tester_name":"technician",
-        "final_company":    "company",
-        "final_cert":       "cert_no",
-    }
-    for form_key in ["united_form", "jax_form"]:
-        if form_key in st.session_state:
-            form = st.session_state[form_key]
-            for tk in TESTER_KEYS:
-                form[tk] = profile.get(tk, "")
-            for jk, pk in jax_map.items():
-                form[jk] = profile.get(pk, "")
-    _clear_tester_widget_state()
-
-
 def render_technician_sidebar():
-    st.sidebar.title("👤 Employee Profile")
+    st.sidebar.title("👤 Technician Profile")
 
-    # ── Technician selector ──────────────────────────────────────────────
     names = get_technician_names()
     prev_sel = st.session_state.get("_sidebar_tech_sel", "")
     if prev_sel not in names:
@@ -970,39 +929,89 @@ def render_technician_sidebar():
         key="sidebar_tech_select",
     )
 
-    # When selection changes, push profile into forms immediately
     if selected != prev_sel:
         st.session_state["_sidebar_tech_sel"] = selected
         profile = get_technician_profile(selected) if selected else {}
-        _apply_profile_to_forms(profile)
-        # Reset edit fields so they show the new profile
-        for k in ["_prof_name", "_prof_co", "_prof_cert", "_prof_rec",
-                  "_prof_gmfg", "_prof_gsn", "_prof_cal"]:
-            st.session_state.pop(k, None)
+        if profile.get("signature_b64"):
+            st.session_state["signature_b64"] = profile.get("signature_b64")
+        for key in ["united_form", "jax_form"]:
+            if key in st.session_state:
+                form = st.session_state[key]
+                for tk in TESTER_KEYS:
+                    form[tk] = profile.get(tk, "")
+                jax_map = {
+                    "init_tester_name": "technician",
+                    "init_company":     "company",
+                    "init_cert":        "cert_no",
+                    "final_tester_name":"technician",
+                    "final_company":    "company",
+                    "final_cert":       "cert_no",
+                }
+                for jk, pk in jax_map.items():
+                    form[jk] = profile.get(pk, "")
+        _clear_tester_widget_state()
         st.rerun()
 
-    # Pre-populate on first load
     if selected and "_sidebar_tech_populated" not in st.session_state:
         st.session_state["_sidebar_tech_populated"] = True
         profile = get_technician_profile(selected)
-        _apply_profile_to_forms(profile)
+        if profile.get("signature_b64"):
+            st.session_state["signature_b64"] = profile.get("signature_b64")
+        for key in ["united_form", "jax_form"]:
+            if key in st.session_state:
+                form = st.session_state[key]
+                for tk in TESTER_KEYS:
+                    form[tk] = profile.get(tk, "")
+                jax_map = {
+                    "init_tester_name": "technician",
+                    "init_company":     "company",
+                    "init_cert":        "cert_no",
+                    "final_tester_name":"technician",
+                    "final_company":    "company",
+                    "final_cert":       "cert_no",
+                }
+                for jk, pk in jax_map.items():
+                    form[jk] = profile.get(pk, "")
         _clear_tester_widget_state()
 
-    # ── Always-visible profile fields ───────────────────────────────────
-    profile = get_technician_profile(selected) if selected else {}
-
     st.sidebar.divider()
-    st.sidebar.markdown("**Profile Fields**")
 
-    prof_name = st.sidebar.text_input("Name", value=profile.get("technician", selected), key="_prof_name")
-    prof_co   = st.sidebar.text_input("Company",   value=profile.get("company", ""),       key="_prof_co")
-    prof_cert = st.sidebar.text_input("Cert No.",  value=profile.get("cert_no", ""),       key="_prof_cert")
-    prof_rec  = st.sidebar.text_input("Re-Cert",   value=profile.get("recert", ""),        key="_prof_rec")
-    prof_gmfg = st.sidebar.text_input("Gauge Mfg", value=profile.get("gauge_mfg", ""),     key="_prof_gmfg")
-    prof_gsn  = st.sidebar.text_input("Gauge SN",  value=profile.get("gauge_serial", ""),  key="_prof_gsn")
-    prof_cal  = st.sidebar.text_input("Date Cal",  value=profile.get("date_cal", ""),      key="_prof_cal")
+    with st.sidebar.expander("✏️ Edit / Add Profile", expanded=False):
+        current = get_technician_profile(selected) if selected else {}
+        prof_name = st.text_input("Name (key)", value=selected, key="prof_name")
+        prof_co   = st.text_input("Company",    value=current.get("company", ""), key="prof_co")
+        prof_cert = st.text_input("Cert No.",   value=current.get("cert_no", ""), key="prof_cert")
+        prof_rec  = st.text_input("Re-Cert",    value=current.get("recert", ""),  key="prof_rec")
+        prof_gmfg = st.text_input("Gauge Mfg",  value=current.get("gauge_mfg", ""), key="prof_gmfg")
+        prof_gsn  = st.text_input("Gauge SN",   value=current.get("gauge_serial", ""), key="prof_gsn")
+        prof_cal  = st.text_input("Date Cal",   value=current.get("date_cal", ""), key="prof_cal")
 
-    # ── Signature ────────────────────────────────────────────────────────
+        if current.get("signature_b64"):
+            st.caption("Saved profile signature:")
+            st.image(base64.b64decode(current["signature_b64"]), width=180)
+
+        if st.button("💾 Save Profile", key="save_profile_btn"):
+            if prof_name.strip():
+                profile = {
+                    "technician":   prof_name.strip(),
+                    "company":      prof_co.strip(),
+                    "cert_no":      prof_cert.strip(),
+                    "recert":       prof_rec.strip(),
+                    "gauge_mfg":    prof_gmfg.strip(),
+                    "gauge_serial": prof_gsn.strip(),
+                    "date_cal":     prof_cal.strip(),
+                    "signature_b64": st.session_state.get("signature_b64", ""),
+                }
+                ok, msg = upsert_technician_profile(prof_name.strip(), profile)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.warning(msg)
+                st.session_state["_sidebar_tech_sel"] = prof_name.strip()
+                st.rerun()
+            else:
+                st.error("Name cannot be empty.")
+
     st.sidebar.divider()
     st.sidebar.markdown("**Signature**")
 
@@ -1034,32 +1043,6 @@ def render_technician_sidebar():
     except ImportError:
         st.sidebar.info("Install streamlit-drawable-canvas for signature support.")
 
-    # ── Save button ──────────────────────────────────────────────────────
-    st.sidebar.divider()
-    if st.sidebar.button("💾 Save Profile", key="save_profile_btn", use_container_width=True):
-        name_key = (prof_name or "").strip()
-        if name_key:
-            new_profile = {
-                "technician":   name_key,
-                "company":      prof_co.strip(),
-                "cert_no":      prof_cert.strip(),
-                "recert":       prof_rec.strip(),
-                "gauge_mfg":    prof_gmfg.strip(),
-                "gauge_serial": prof_gsn.strip(),
-                "date_cal":     prof_cal.strip(),
-            }
-            ok, msg = upsert_technician_profile(name_key, new_profile)
-            if ok:
-                st.sidebar.success(msg)
-            else:
-                st.sidebar.warning(msg)
-            st.session_state["_sidebar_tech_sel"] = name_key
-            _apply_profile_to_forms(new_profile)
-            _clear_tester_widget_state()
-            st.rerun()
-        else:
-            st.sidebar.error("Name cannot be empty.")
-
 
 # ===========================================================================
 # United Fire tab
@@ -1069,24 +1052,25 @@ def render_united_tab():
     _init_form("united_form")
     form = st.session_state["united_form"]
 
-    # Pre-populate tester fields from selected technician (first load)
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
     if selected_tech and not st.session_state.get("_united_tester_preloaded"):
         profile = get_technician_profile(selected_tech)
         for tk in TESTER_KEYS:
             if not form.get(tk):
                 form[tk] = profile.get(tk, "")
+        if profile.get("signature_b64") and not st.session_state.get("signature_b64"):
+            st.session_state["signature_b64"] = profile.get("signature_b64")
         st.session_state["_united_tester_preloaded"] = True
 
     st.subheader("📋 United Fire — Backflow Test Report")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns([1.15, 1])
     with col1:
-        tap_clear_input("Date", "united_form", "date", "u_date")
+        synced_date_input("Inspection Date", "united_form", "date", "u_date_picker", ["date", "test_date"])
     with col2:
         tap_clear_input("Branch", "united_form", "branch", "u_branch")
-    with col3:
-        tap_clear_input("AHJ", "united_form", "ahj", "u_ahj")
+
+    tap_clear_input("AHJ", "united_form", "ahj", "u_ahj")
 
     col4, col5 = st.columns(2)
     with col4:
@@ -1098,14 +1082,12 @@ def render_united_tab():
 
     st.divider()
     st.markdown("**Assembly Info**")
-    col6, col7, col8, col9 = st.columns(4)
+    col6, col7 = st.columns(2)
     with col6:
         tap_clear_input("Serial Number", "united_form", "serial_number", "u_sn")
-    with col7:
         tap_clear_input("Manufacturer", "united_form", "manufacturer", "u_mfg")
-    with col8:
+    with col7:
         tap_clear_input("Model", "united_form", "model", "u_mdl")
-    with col9:
         tap_clear_input("Size", "united_form", "size", "u_sz")
 
     col10, col11, col12 = st.columns(3)
@@ -1191,7 +1173,7 @@ def render_united_tab():
             clearable_input("PVB CV (psi)", "united_form", "pvb_cv_psi", "u_cvpsi")
 
     st.divider()
-    clearable_input("Test Date", "united_form", "test_date", "u_tdate")
+    st.caption(f"Test Date will match Inspection Date: {form.get('test_date', '')}")
 
     ar_opts = ["", "PASSED", "FAILED"]
     cur_ar = form.get("assembly_result", "")
@@ -1221,7 +1203,6 @@ def render_united_tab():
                 pdf_bytes = generate_united_pdf(form)
                 fname = f"backflow_{form.get('customer_name','report').replace(' ','_')}.pdf"
                 st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="u_dl_pdf")
-                # Clear green fields after generating
                 for k in UNITED_GREEN - {"assembly_type", "system_service", "bypass"}:
                     form.pop(k, None)
                 for wk in UNITED_GREEN_WIDGET_KEYS:
@@ -1269,7 +1250,6 @@ def render_jax_tab():
     _init_form("jax_form")
     form = st.session_state["jax_form"]
 
-    # Pre-populate tester fields from selected technician (first load)
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
     if selected_tech and not st.session_state.get("_jax_tester_preloaded"):
         profile = get_technician_profile(selected_tech)
@@ -1284,11 +1264,20 @@ def render_jax_tab():
         for jk, pk in jax_map.items():
             if not form.get(jk):
                 form[jk] = profile.get(pk, "")
+        if profile.get("signature_b64") and not st.session_state.get("signature_b64"):
+            st.session_state["signature_b64"] = profile.get("signature_b64")
         st.session_state["_jax_tester_preloaded"] = True
 
     st.subheader("📋 Jacksonville (JEA) — Backflow Test Report")
 
-    # Property info
+    synced_date_input(
+        "Inspection Date",
+        "jax_form",
+        "signature_date",
+        "j_sig_date_picker",
+        ["signature_date", "init_test_date", "final_test_date", "repair_date"],
+    )
+
     st.markdown("**Property Info**")
     col1, col2 = st.columns(2)
     with col1:
@@ -1341,14 +1330,12 @@ def render_jax_tab():
 
     st.divider()
     st.markdown("**Device Info**")
-    col_dt, col_mfg, col_sz, col_mn = st.columns(4)
+    col_dt, col_mfg = st.columns(2)
     with col_dt:
         clearable_input("Device Type", "jax_form", "device_type", "j_dt")
-    with col_mfg:
         clearable_input("Manufacturer", "jax_form", "manufacturer", "j_mfg")
-    with col_sz:
+    with col_mfg:
         clearable_input("Size", "jax_form", "size", "j_sz")
-    with col_mn:
         clearable_input("Model Number", "jax_form", "model_number", "j_mn")
 
     col_sn, col_id = st.columns(2)
@@ -1360,7 +1347,7 @@ def render_jax_tab():
     st.divider()
     st.markdown("**Initial Test**")
 
-    col_icv1a, col_icv1b, col_icv2a, col_icv2b = st.columns(4)
+    col_icv1a, col_icv1b = st.columns(2)
     with col_icv1a:
         icv1_opts = ["", "Closed Tight", "Leaked"]
         cur_icv1 = form.get("init_cv1_result", "")
@@ -1368,6 +1355,8 @@ def render_jax_tab():
         form["init_cv1_result"] = st.selectbox("Init CV1", icv1_opts, index=icv1_idx, key="init_cv1_result")
     with col_icv1b:
         clearable_input("Init CV1 (psi)", "jax_form", "init_cv1_psi", "j_icv1p")
+
+    col_icv2a, col_icv2b = st.columns(2)
     with col_icv2a:
         icv2_opts = ["", "Closed Tight", "Leaked"]
         cur_icv2 = form.get("init_cv2_result", "")
@@ -1376,7 +1365,7 @@ def render_jax_tab():
     with col_icv2b:
         clearable_input("Init CV2 (psi)", "jax_form", "init_cv2_psi", "j_icv2p")
 
-    col_irva, col_irvb, col_ipvba, col_ipvbb = st.columns(4)
+    col_irva, col_irvb = st.columns(2)
     with col_irva:
         irv_opts = ["", "Opened", "Did Not Open"]
         cur_irv = form.get("init_rv_result", "")
@@ -1384,6 +1373,8 @@ def render_jax_tab():
         form["init_rv_result"] = st.selectbox("Init RV", irv_opts, index=irv_idx, key="init_rv_result")
     with col_irvb:
         clearable_input("Init RV (psi)", "jax_form", "init_rv_psi", "j_irvp")
+
+    col_ipvba, col_ipvbb = st.columns(2)
     with col_ipvba:
         ipvb_opts = ["", "Air Inlet Opened", "Air Inlet Did Not"]
         cur_ipvb = form.get("init_pvb_result", "")
@@ -1395,7 +1386,7 @@ def render_jax_tab():
     st.divider()
     st.markdown("**Final Test**")
 
-    col_fcv1a, col_fcv1b, col_fcv2a, col_fcv2b = st.columns(4)
+    col_fcv1a, col_fcv1b = st.columns(2)
     with col_fcv1a:
         fcv1_opts = ["", "Closed Tight", "Leaked"]
         cur_fcv1 = form.get("final_cv1_result", "")
@@ -1403,6 +1394,8 @@ def render_jax_tab():
         form["final_cv1_result"] = st.selectbox("Final CV1", fcv1_opts, index=fcv1_idx, key="final_cv1_result")
     with col_fcv1b:
         clearable_input("Final CV1 (psi)", "jax_form", "final_cv1_psi", "j_fcv1p")
+
+    col_fcv2a, col_fcv2b = st.columns(2)
     with col_fcv2a:
         fcv2_opts = ["", "Closed Tight", "Leaked"]
         cur_fcv2 = form.get("final_cv2_result", "")
@@ -1411,7 +1404,7 @@ def render_jax_tab():
     with col_fcv2b:
         clearable_input("Final CV2 (psi)", "jax_form", "final_cv2_psi", "j_fcv2p")
 
-    col_frva, col_frvb, col_fpvba, _ = st.columns(4)
+    col_frva, col_frvb = st.columns(2)
     with col_frva:
         frv_opts = ["", "Opened", "Did Not Open"]
         cur_frv = form.get("final_rv_result", "")
@@ -1419,11 +1412,11 @@ def render_jax_tab():
         form["final_rv_result"] = st.selectbox("Final RV", frv_opts, index=frv_idx, key="final_rv_result")
     with col_frvb:
         clearable_input("Final RV (psi)", "jax_form", "final_rv_psi", "j_frvp")
-    with col_fpvba:
-        fpvb_opts = ["", "Satisfactory", "Unsatisfactory"]
-        cur_fpvb = form.get("final_pvb_result", "")
-        fpvb_idx = fpvb_opts.index(cur_fpvb) if cur_fpvb in fpvb_opts else 0
-        form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_idx, key="final_pvb_result")
+
+    fpvb_opts = ["", "Satisfactory", "Unsatisfactory"]
+    cur_fpvb = form.get("final_pvb_result", "")
+    fpvb_idx = fpvb_opts.index(cur_fpvb) if cur_fpvb in fpvb_opts else 0
+    form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_idx, key="final_pvb_result")
 
     st.divider()
     clearable_input("Repairs", "jax_form", "repairs", "j_rep")
@@ -1440,19 +1433,19 @@ def render_jax_tab():
         clearable_input("Init Tester Name", "jax_form", "init_tester_name", "j_itn")
         clearable_input("Init Company",     "jax_form", "init_company",     "j_ico")
         clearable_input("Init Cert",        "jax_form", "init_cert",        "j_ic")
-        clearable_input("Init Test Date",   "jax_form", "init_test_date",   "j_itd")
+        st.caption(f"Init Test Date: {form.get('init_test_date', '')}")
     with col_ti2:
         clearable_input("Repaired By",      "jax_form", "repaired_by",      "j_rb")
         clearable_input("Repair Company",   "jax_form", "repair_company",   "j_rco")
         clearable_input("Repair Cert",      "jax_form", "repair_cert",      "j_rc")
-        clearable_input("Repair Date",      "jax_form", "repair_date",      "j_rd")
+        st.caption(f"Repair Date: {form.get('repair_date', '')}")
     with col_ti3:
         clearable_input("Final Tester Name","jax_form", "final_tester_name","j_ftn")
         clearable_input("Final Company",    "jax_form", "final_company",    "j_fco")
         clearable_input("Final Cert",       "jax_form", "final_cert",       "j_fc")
-        clearable_input("Final Test Date",  "jax_form", "final_test_date",  "j_ftd")
+        st.caption(f"Final Test Date: {form.get('final_test_date', '')}")
 
-    clearable_input("Signature Date", "jax_form", "signature_date", "j_sd")
+    st.caption(f"Signature Date: {form.get('signature_date', '')}")
 
     st.divider()
 
