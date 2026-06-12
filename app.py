@@ -172,7 +172,6 @@ def _upload_pdf_to_github(filename: str, pdf_bytes: bytes):
     if not token:
         return False, "No GITHUB_TOKEN."
     path = f"{JOBS_FOLDER}/{filename}"
-    # Check if file already exists (need SHA to overwrite)
     existing_sha = None
     check_url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{path}"
     try:
@@ -200,7 +199,6 @@ def autosave_job(form_data: dict, pdf_bytes: bytes, form_type: str):
     Save PDF to jobs/ and append a summary row to jobs/jobs.json.
     Returns (ok: bool, message: str, pdf_filename: str).
     """
-    # Build filename
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     if form_type == "united":
         cust = form_data.get("customer_name", "unknown").replace(" ", "_").replace("/", "-")
@@ -209,12 +207,10 @@ def autosave_job(form_data: dict, pdf_bytes: bytes, form_type: str):
         prem = form_data.get("premises_name", "unknown").replace(" ", "_").replace("/", "-")
         filename = f"jax_{prem}_{ts}.pdf"
 
-    # Upload PDF
     pdf_ok, pdf_result = _upload_pdf_to_github(filename, pdf_bytes)
     if not pdf_ok:
         return False, f"PDF upload failed: {pdf_result}", filename
 
-    # Append to jobs index
     jobs, jobs_sha = _load_jobs_index()
     job_entry = {
         "filename": filename,
@@ -234,7 +230,6 @@ def autosave_job(form_data: dict, pdf_bytes: bytes, form_type: str):
     if not idx_ok:
         return True, f"PDF saved but index update failed: {new_sha}", filename
 
-    # Cache in session so the Jobs tab shows it immediately without a reload
     st.session_state["_jobs_cache"] = jobs
     return True, f"Job saved ✓ ({filename})", filename
 
@@ -275,7 +270,6 @@ def build_jobs_excel(jobs: list) -> bytes:
         ws.cell(row=row_idx, column=8, value=job.get("assembly_type", ""))
         ws.cell(row=row_idx, column=9, value=job.get("assembly_result", ""))
         ws.cell(row=row_idx, column=10, value=job.get("filename", ""))
-        # Color result cell
         result_cell = ws.cell(row=row_idx, column=9)
         if job.get("assembly_result") == "PASSED":
             result_cell.fill = PatternFill("solid", fgColor="C6EFCE")
@@ -284,7 +278,6 @@ def build_jobs_excel(jobs: list) -> bytes:
             result_cell.fill = PatternFill("solid", fgColor="FFC7CE")
             result_cell.font = Font(color="9C0006")
 
-    # Auto-width columns
     for col in ws.columns:
         max_len = max((len(str(c.value or "")) for c in col), default=0)
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
@@ -344,6 +337,7 @@ JAX_CHECKBOXES = {
     "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
 }
 
+# Display widget keys — cleared on profile load so Streamlit re-reads from form dict
 UNITED_TESTER_DISPLAY_KEYS = [
     "u_gmfg_display", "u_gsn_display", "u_cal_display",
     "u_tech_display", "u_cert_display", "u_recert_display",
@@ -475,15 +469,21 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
 
 
 def apply_profile_to_forms(profile: dict):
+    """
+    Push profile data into both form dicts and wipe ALL cached widget keys
+    so Streamlit re-reads the new values from the form dict on the next render.
+    """
     if not profile:
         return
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
+
     _init_form("united_form")
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
+
     _init_form("jax_form")
     jax = st.session_state["jax_form"]
     for jk, pk in JAX_TESTER_MAP.items():
@@ -491,6 +491,8 @@ def apply_profile_to_forms(profile: dict):
     for tk in TESTER_KEYS:
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
+
+    # Clear every widget key so the next render pulls fresh values from the form dicts above
     _clear_widget_keys(
         UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
         + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
@@ -761,7 +763,7 @@ def render_technician_sidebar():
 
 
 # ─────────────────────────────────────────────────────────────
-# Tester panels
+# Tester panels — read directly from form dict, no stale widget cache
 # ─────────────────────────────────────────────────────────────
 
 def render_tester_panel_united():
@@ -776,6 +778,7 @@ def render_tester_panel_united():
     st.caption(f"Profile loaded: **{selected_tech}**")
     col1, col2 = st.columns(2)
     with col1:
+        # Use value= directly from form dict; widget key is unique per render cycle
         st.text_input("Gauge Mfg", value=form.get("gauge_mfg", ""), disabled=True, key="u_gmfg_display")
         st.text_input("Gauge Serial", value=form.get("gauge_serial", ""), disabled=True, key="u_gsn_display")
         st.text_input("Date Calibrated", value=form.get("date_cal", ""), disabled=True, key="u_cal_display")
@@ -921,14 +924,11 @@ def render_united_tab():
             try:
                 form["signature_b64"] = st.session_state.get("signature_b64", form.get("signature_b64", ""))
                 pdf_bytes = generate_united_pdf(form)
-                # Autosave
                 save_ok, save_msg, fname = autosave_job(form, pdf_bytes, "united")
                 if save_ok:
                     st.success(save_msg)
                 else:
                     st.warning(save_msg)
-                # Download button always appears
-                cust = form.get('customer_name', 'report').replace(' ', '_')
                 st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="u_dl_pdf")
             except Exception as e:
                 st.error(f"PDF error: {e}")
@@ -1081,7 +1081,6 @@ def render_jobs_tab():
     st.caption(f"{len(jobs)} job(s) on record")
     st.divider()
 
-    # Show newest first
     for job in reversed(jobs):
         result = job.get("assembly_result", "")
         result_icon = "✅" if result == "PASSED" else ("❌" if result == "FAILED" else "❔")
