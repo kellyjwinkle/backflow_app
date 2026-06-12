@@ -337,24 +337,29 @@ JAX_CHECKBOXES = {
     "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
 }
 
-# Display widget keys — cleared on profile load so Streamlit re-reads from form dict
+# ── All widget keys that must be wiped on profile load ──────────────────────
+# Display-only (disabled text_input) keys for the tester panels
 UNITED_TESTER_DISPLAY_KEYS = [
     "u_gmfg_display", "u_gsn_display", "u_cal_display",
     "u_tech_display", "u_cert_display", "u_recert_display",
 ]
 JAX_TESTER_DISPLAY_KEYS = [
     "j_itn_display", "j_ico_display", "j_ic_display",
-    "j_rb_display", "j_rco_display", "j_rc_display",
+    "j_rb_display",  "j_rco_display", "j_rc_display",
     "j_ftn_display", "j_fco_display", "j_fc_display",
 ]
+# Editable widget keys (used by clearable_input) — kept for back-compat clearing
 UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
-JAX_TESTER_WIDGET_KEYS = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
+JAX_TESTER_WIDGET_KEYS    = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
 
+# Canonical profile field names written into united_form
 TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
+
+# Mapping: jax_form field → profile key
 JAX_TESTER_MAP = {
     "init_tester_name": "technician", "init_company": "company", "init_cert": "cert_no",
-    "repaired_by": "technician", "repair_company": "company", "repair_cert": "cert_no",
-    "final_tester_name": "technician", "final_company": "company", "final_cert": "cert_no",
+    "repaired_by":      "technician", "repair_company": "company", "repair_cert": "cert_no",
+    "final_tester_name":"technician", "final_company":  "company", "final_cert":  "cert_no",
 }
 
 
@@ -470,33 +475,45 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
 
 def apply_profile_to_forms(profile: dict):
     """
-    Push profile data into both form dicts and wipe ALL cached widget keys
-    so Streamlit re-reads the new values from the form dict on the next render.
+    Push profile data into both form dicts, set the global signature,
+    then wipe EVERY display and editable widget key so Streamlit is
+    forced to re-read from the form dicts on the next render.
+
+    This is the root fix for:
+      - technician info not appearing in the form bottom panels
+      - only the signature (not tester fields) writing into generated PDFs
     """
+    # Always clear widget keys first — even if profile is empty —
+    # so stale cached values can never survive a profile switch.
+    _clear_widget_keys(
+        UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
+        + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
+    )
+
     if not profile:
         return
+
+    # ── Signature ────────────────────────────────────────────
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
 
+    # ── United form ──────────────────────────────────────────
     _init_form("united_form")
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
 
+    # ── JAX form ─────────────────────────────────────────────
     _init_form("jax_form")
     jax = st.session_state["jax_form"]
+    # Map each JAX tester field to the correct profile key
     for jk, pk in JAX_TESTER_MAP.items():
         jax[jk] = profile.get(pk, "")
+    # Also write gauge / cal fields directly (used in PDF generation)
     for tk in TESTER_KEYS:
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
-
-    # Clear every widget key so the next render pulls fresh values from the form dicts above
-    _clear_widget_keys(
-        UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
-        + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
-    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -778,14 +795,13 @@ def render_tester_panel_united():
     st.caption(f"Profile loaded: **{selected_tech}**")
     col1, col2 = st.columns(2)
     with col1:
-        # Use value= directly from form dict; widget key is unique per render cycle
-        st.text_input("Gauge Mfg", value=form.get("gauge_mfg", ""), disabled=True, key="u_gmfg_display")
-        st.text_input("Gauge Serial", value=form.get("gauge_serial", ""), disabled=True, key="u_gsn_display")
-        st.text_input("Date Calibrated", value=form.get("date_cal", ""), disabled=True, key="u_cal_display")
+        st.text_input("Gauge Mfg",       value=form.get("gauge_mfg",    ""), disabled=True, key="u_gmfg_display")
+        st.text_input("Gauge Serial",     value=form.get("gauge_serial", ""), disabled=True, key="u_gsn_display")
+        st.text_input("Date Calibrated",  value=form.get("date_cal",     ""), disabled=True, key="u_cal_display")
     with col2:
-        st.text_input("Technician", value=form.get("technician", ""), disabled=True, key="u_tech_display")
-        st.text_input("Cert No.", value=form.get("cert_no", ""), disabled=True, key="u_cert_display")
-        st.text_input("Re-Cert Date", value=form.get("recert", ""), disabled=True, key="u_recert_display")
+        st.text_input("Technician",       value=form.get("technician",   ""), disabled=True, key="u_tech_display")
+        st.text_input("Cert No.",         value=form.get("cert_no",      ""), disabled=True, key="u_cert_display")
+        st.text_input("Re-Cert Date",     value=form.get("recert",       ""), disabled=True, key="u_recert_display")
     sig_b64 = st.session_state.get("signature_b64") or form.get("signature_b64")
     if sig_b64:
         st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
@@ -807,23 +823,23 @@ def render_tester_panel_jax():
     with col_itn:
         st.text_input("Init Tester Name", value=form.get("init_tester_name", ""), disabled=True, key="j_itn_display")
     with col_ico:
-        st.text_input("Init Company", value=form.get("init_company", ""), disabled=True, key="j_ico_display")
+        st.text_input("Init Company",     value=form.get("init_company",    ""), disabled=True, key="j_ico_display")
     with col_ic:
-        st.text_input("Init Cert", value=form.get("init_cert", ""), disabled=True, key="j_ic_display")
+        st.text_input("Init Cert",        value=form.get("init_cert",       ""), disabled=True, key="j_ic_display")
     col_rb, col_rco, col_rc = st.columns(3)
     with col_rb:
-        st.text_input("Repaired By", value=form.get("repaired_by", ""), disabled=True, key="j_rb_display")
+        st.text_input("Repaired By",      value=form.get("repaired_by",     ""), disabled=True, key="j_rb_display")
     with col_rco:
-        st.text_input("Repair Company", value=form.get("repair_company", ""), disabled=True, key="j_rco_display")
+        st.text_input("Repair Company",   value=form.get("repair_company",  ""), disabled=True, key="j_rco_display")
     with col_rc:
-        st.text_input("Repair Cert", value=form.get("repair_cert", ""), disabled=True, key="j_rc_display")
+        st.text_input("Repair Cert",      value=form.get("repair_cert",     ""), disabled=True, key="j_rc_display")
     col_ftn, col_fco, col_fc = st.columns(3)
     with col_ftn:
-        st.text_input("Final Tester Name", value=form.get("final_tester_name", ""), disabled=True, key="j_ftn_display")
+        st.text_input("Final Tester Name",value=form.get("final_tester_name",""), disabled=True, key="j_ftn_display")
     with col_fco:
-        st.text_input("Final Company", value=form.get("final_company", ""), disabled=True, key="j_fco_display")
+        st.text_input("Final Company",    value=form.get("final_company",   ""), disabled=True, key="j_fco_display")
     with col_fc:
-        st.text_input("Final Cert", value=form.get("final_cert", ""), disabled=True, key="j_fc_display")
+        st.text_input("Final Cert",       value=form.get("final_cert",      ""), disabled=True, key="j_fc_display")
     sig_b64 = st.session_state.get("signature_b64") or form.get("signature_b64")
     if sig_b64:
         st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
