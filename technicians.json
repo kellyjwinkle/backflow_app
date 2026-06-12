@@ -27,15 +27,6 @@
     "date_cal": "",
     "signature_b64": ""
   },
-  "Wes": {
-    "technician": "Wes",
-    "company": "",
-    "cert_no": "Test",
-    "recert": "Test1",
-    "gauge_mfg": "Test2",
-    "gauge_serial": "Test3",
-    "date_cal": "Test4"
-  },
   "Test1": {
     "technician": "Test1",
     "company": "Test2",
