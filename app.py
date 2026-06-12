@@ -717,11 +717,11 @@ def render_united_tab():
     bp_opts = ["", "Yes", "No"]
     col10, col11, col12 = st.columns(3)
     with col10:
-        form["assembly_type"] = st.selectbox("Assembly Type", atype_opts, index=atype_opts.index(form.get("assembly_type", "")) if form.get("assembly_type", "") in atype_opts else 0)
+        form["assembly_type"] = st.selectbox("Assembly Type", atype_opts, index=atype_opts.index(form.get("assembly_type", "")) if form.get("assembly_type", "") in atype_opts else 0, key="u_assembly_type")
     with col11:
-        form["system_service"] = st.selectbox("System Service", svc_opts, index=svc_opts.index(form.get("system_service", "")) if form.get("system_service", "") in svc_opts else 0)
+        form["system_service"] = st.selectbox("System Service", svc_opts, index=svc_opts.index(form.get("system_service", "")) if form.get("system_service", "") in svc_opts else 0, key="u_system_service")
     with col12:
-        form["bypass"] = st.selectbox("Fire Bypass", bp_opts, index=bp_opts.index(form.get("bypass", "")) if form.get("bypass", "") in bp_opts else 0)
+        form["bypass"] = st.selectbox("Fire Bypass", bp_opts, index=bp_opts.index(form.get("bypass", "")) if form.get("bypass", "") in bp_opts else 0, key="u_bypass")
 
     st.divider()
     st.markdown("**Test Results**")
@@ -730,46 +730,46 @@ def render_united_tab():
         col_a, col_b = st.columns(2)
         with col_a:
             cv_opts = ["", "Closed Tight", "Leaked"]
-            form["cv1_result"] = st.selectbox("CV1 Result", cv_opts, index=cv_opts.index(form.get("cv1_result", "")) if form.get("cv1_result", "") in cv_opts else 0)
+            form["cv1_result"] = st.selectbox("CV1 Result", cv_opts, index=cv_opts.index(form.get("cv1_result", "")) if form.get("cv1_result", "") in cv_opts else 0, key="u_cv1_result")
         with col_b:
             clearable_input("CV1 DP (psi)", "united_form", "cv1_dp", "u_cv1dp")
         col_a, col_b = st.columns(2)
         with col_a:
             cv_opts = ["", "Closed Tight", "Leaked"]
-            form["cv2_result"] = st.selectbox("CV2 Result", cv_opts, index=cv_opts.index(form.get("cv2_result", "")) if form.get("cv2_result", "") in cv_opts else 0)
+            form["cv2_result"] = st.selectbox("CV2 Result", cv_opts, index=cv_opts.index(form.get("cv2_result", "")) if form.get("cv2_result", "") in cv_opts else 0, key="u_cv2_result")
         with col_b:
             clearable_input("CV2 DP (psi)", "united_form", "cv2_dp", "u_cv2dp")
     if atype in ("", "RP"):
         col_a, col_b = st.columns(2)
         with col_a:
             rv_opts = ["", "Opened", "Did Not Open"]
-            form["rv_result"] = st.selectbox("RV Result", rv_opts, index=rv_opts.index(form.get("rv_result", "")) if form.get("rv_result", "") in rv_opts else 0)
+            form["rv_result"] = st.selectbox("RV Result", rv_opts, index=rv_opts.index(form.get("rv_result", "")) if form.get("rv_result", "") in rv_opts else 0, key="u_rv_result")
         with col_b:
             clearable_input("RV Opened At (psi)", "united_form", "rv_psi", "u_rvpsi")
         col_a, col_b = st.columns(2)
         with col_a:
             out_opts = ["", "Closed Tight", "Leaked"]
-            form["rv_out_result"] = st.selectbox("RV Outlet", out_opts, index=out_opts.index(form.get("rv_out_result", "")) if form.get("rv_out_result", "") in out_opts else 0)
+            form["rv_out_result"] = st.selectbox("RV Outlet", out_opts, index=out_opts.index(form.get("rv_out_result", "")) if form.get("rv_out_result", "") in out_opts else 0, key="u_rv_out_result")
         with col_b:
             in_opts = ["", "Closed Tight", "Leaked"]
-            form["rv_in_result"] = st.selectbox("RV Inlet", in_opts, index=in_opts.index(form.get("rv_in_result", "")) if form.get("rv_in_result", "") in in_opts else 0)
+            form["rv_in_result"] = st.selectbox("RV Inlet", in_opts, index=in_opts.index(form.get("rv_in_result", "")) if form.get("rv_in_result", "") in in_opts else 0, key="u_rv_in_result")
     if atype in ("", "PVB", "SVB"):
         col_a, col_b = st.columns(2)
         with col_a:
             ai_opts = ["", "Opened", "Did Not Open"]
-            form["pvb_ai_result"] = st.selectbox("PVB Air Inlet", ai_opts, index=ai_opts.index(form.get("pvb_ai_result", "")) if form.get("pvb_ai_result", "") in ai_opts else 0)
+            form["pvb_ai_result"] = st.selectbox("PVB Air Inlet", ai_opts, index=ai_opts.index(form.get("pvb_ai_result", "")) if form.get("pvb_ai_result", "") in ai_opts else 0, key="u_pvb_ai_result")
         with col_b:
             clearable_input("PVB AI (psi)", "united_form", "pvb_ai_psi", "u_aipsi")
         col_a, col_b = st.columns(2)
         with col_a:
             pcv_opts = ["", "Leaked", "Held"]
-            form["pvb_cv_result"] = st.selectbox("PVB CV Result", pcv_opts, index=pcv_opts.index(form.get("pvb_cv_result", "")) if form.get("pvb_cv_result", "") in pcv_opts else 0)
+            form["pvb_cv_result"] = st.selectbox("PVB CV Result", pcv_opts, index=pcv_opts.index(form.get("pvb_cv_result", "")) if form.get("pvb_cv_result", "") in pcv_opts else 0, key="u_pvb_cv_result")
         with col_b:
             clearable_input("PVB CV (psi)", "united_form", "pvb_cv_psi", "u_cvpsi")
     st.divider()
     st.caption(f"Test Date will match Inspection Date: {form.get('test_date', '')}")
     ar_opts = ["", "PASSED", "FAILED"]
-    form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0)
+    form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0, key="u_assembly_result")
     clearable_input("Repair Description", "united_form", "repair_desc", "u_rep")
     render_tester_panel_united()
     if st.button("🖨️ Generate PDF", key="u_gen_pdf"):
@@ -809,18 +809,18 @@ def render_jax_tab():
     rst_opts = ["", "Potable", "Irrigation"]
     col1, col2, col3 = st.columns(3)
     with col1:
-        form["comm_test_purpose"] = st.selectbox("Comm Test Purpose", ctp_opts, index=ctp_opts.index(form.get("comm_test_purpose", "")) if form.get("comm_test_purpose", "") in ctp_opts else 0)
+        form["comm_test_purpose"] = st.selectbox("Comm Test Purpose", ctp_opts, index=ctp_opts.index(form.get("comm_test_purpose", "")) if form.get("comm_test_purpose", "") in ctp_opts else 0, key="j_comm_test_purpose")
     with col2:
-        form["comm_service_type"] = st.selectbox("Comm Service Type", cst_opts, index=cst_opts.index(form.get("comm_service_type", "")) if form.get("comm_service_type", "") in cst_opts else 0)
+        form["comm_service_type"] = st.selectbox("Comm Service Type", cst_opts, index=cst_opts.index(form.get("comm_service_type", "")) if form.get("comm_service_type", "") in cst_opts else 0, key="j_comm_service_type")
     with col3:
-        form["comm_reclaim"] = st.selectbox("Comm Reclaim Water", yn_opts, index=yn_opts.index(form.get("comm_reclaim", "")) if form.get("comm_reclaim", "") in yn_opts else 0)
+        form["comm_reclaim"] = st.selectbox("Comm Reclaim Water", yn_opts, index=yn_opts.index(form.get("comm_reclaim", "")) if form.get("comm_reclaim", "") in yn_opts else 0, key="j_comm_reclaim")
     col1, col2, col3 = st.columns(3)
     with col1:
-        form["res_test_purpose"] = st.selectbox("Res Test Purpose", ctp_opts, index=ctp_opts.index(form.get("res_test_purpose", "")) if form.get("res_test_purpose", "") in ctp_opts else 0)
+        form["res_test_purpose"] = st.selectbox("Res Test Purpose", ctp_opts, index=ctp_opts.index(form.get("res_test_purpose", "")) if form.get("res_test_purpose", "") in ctp_opts else 0, key="j_res_test_purpose")
     with col2:
-        form["res_service_type"] = st.selectbox("Res Service Type", rst_opts, index=rst_opts.index(form.get("res_service_type", "")) if form.get("res_service_type", "") in rst_opts else 0)
+        form["res_service_type"] = st.selectbox("Res Service Type", rst_opts, index=rst_opts.index(form.get("res_service_type", "")) if form.get("res_service_type", "") in rst_opts else 0, key="j_res_service_type")
     with col3:
-        form["res_reclaim"] = st.selectbox("Res Reclaim Water", yn_opts, index=yn_opts.index(form.get("res_reclaim", "")) if form.get("res_reclaim", "") in yn_opts else 0)
+        form["res_reclaim"] = st.selectbox("Res Reclaim Water", yn_opts, index=yn_opts.index(form.get("res_reclaim", "")) if form.get("res_reclaim", "") in yn_opts else 0, key="j_res_reclaim")
     st.divider()
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -843,43 +843,43 @@ def render_jax_tab():
     fpvb_opts = ["", "Satisfactory", "Unsatisfactory"]
     col1, col2 = st.columns(2)
     with col1:
-        form["init_cv1_result"] = st.selectbox("Init CV1", cv_opts, index=cv_opts.index(form.get("init_cv1_result", "")) if form.get("init_cv1_result", "") in cv_opts else 0)
+        form["init_cv1_result"] = st.selectbox("Init CV1", cv_opts, index=cv_opts.index(form.get("init_cv1_result", "")) if form.get("init_cv1_result", "") in cv_opts else 0, key="j_init_cv1_result")
     with col2:
         clearable_input("Init CV1 (psi)", "jax_form", "init_cv1_psi", "j_icv1p")
     col1, col2 = st.columns(2)
     with col1:
-        form["init_cv2_result"] = st.selectbox("Init CV2", cv_opts, index=cv_opts.index(form.get("init_cv2_result", "")) if form.get("init_cv2_result", "") in cv_opts else 0)
+        form["init_cv2_result"] = st.selectbox("Init CV2", cv_opts, index=cv_opts.index(form.get("init_cv2_result", "")) if form.get("init_cv2_result", "") in cv_opts else 0, key="j_init_cv2_result")
     with col2:
         clearable_input("Init CV2 (psi)", "jax_form", "init_cv2_psi", "j_icv2p")
     col1, col2 = st.columns(2)
     with col1:
-        form["init_rv_result"] = st.selectbox("Init RV", rv_opts, index=rv_opts.index(form.get("init_rv_result", "")) if form.get("init_rv_result", "") in rv_opts else 0)
+        form["init_rv_result"] = st.selectbox("Init RV", rv_opts, index=rv_opts.index(form.get("init_rv_result", "")) if form.get("init_rv_result", "") in rv_opts else 0, key="j_init_rv_result")
     with col2:
         clearable_input("Init RV (psi)", "jax_form", "init_rv_psi", "j_irvp")
     col1, col2 = st.columns(2)
     with col1:
-        form["init_pvb_result"] = st.selectbox("Init PVB", pvb_opts, index=pvb_opts.index(form.get("init_pvb_result", "")) if form.get("init_pvb_result", "") in pvb_opts else 0)
+        form["init_pvb_result"] = st.selectbox("Init PVB", pvb_opts, index=pvb_opts.index(form.get("init_pvb_result", "")) if form.get("init_pvb_result", "") in pvb_opts else 0, key="j_init_pvb_result")
     with col2:
         clearable_input("Init PVB (psi)", "jax_form", "init_pvb_psi", "j_ipvbp")
     st.divider()
     col1, col2 = st.columns(2)
     with col1:
-        form["final_cv1_result"] = st.selectbox("Final CV1", cv_opts, index=cv_opts.index(form.get("final_cv1_result", "")) if form.get("final_cv1_result", "") in cv_opts else 0)
+        form["final_cv1_result"] = st.selectbox("Final CV1", cv_opts, index=cv_opts.index(form.get("final_cv1_result", "")) if form.get("final_cv1_result", "") in cv_opts else 0, key="j_final_cv1_result")
     with col2:
         clearable_input("Final CV1 (psi)", "jax_form", "final_cv1_psi", "j_fcv1p")
     col1, col2 = st.columns(2)
     with col1:
-        form["final_cv2_result"] = st.selectbox("Final CV2", cv_opts, index=cv_opts.index(form.get("final_cv2_result", "")) if form.get("final_cv2_result", "") in cv_opts else 0)
+        form["final_cv2_result"] = st.selectbox("Final CV2", cv_opts, index=cv_opts.index(form.get("final_cv2_result", "")) if form.get("final_cv2_result", "") in cv_opts else 0, key="j_final_cv2_result")
     with col2:
         clearable_input("Final CV2 (psi)", "jax_form", "final_cv2_psi", "j_fcv2p")
     col1, col2 = st.columns(2)
     with col1:
-        form["final_rv_result"] = st.selectbox("Final RV", rv_opts, index=rv_opts.index(form.get("final_rv_result", "")) if form.get("final_rv_result", "") in rv_opts else 0)
+        form["final_rv_result"] = st.selectbox("Final RV", rv_opts, index=rv_opts.index(form.get("final_rv_result", "")) if form.get("final_rv_result", "") in rv_opts else 0, key="j_final_rv_result")
     with col2:
         clearable_input("Final RV (psi)", "jax_form", "final_rv_psi", "j_frvp")
-    form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_opts.index(form.get("final_pvb_result", "")) if form.get("final_pvb_result", "") in fpvb_opts else 0)
+    form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_opts.index(form.get("final_pvb_result", "")) if form.get("final_pvb_result", "") in fpvb_opts else 0, key="j_final_pvb_result")
     ar_opts = ["", "PASSED", "FAILED"]
-    form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0)
+    form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0, key="j_assembly_result")
     clearable_input("Repairs / Notes", "jax_form", "repairs", "j_rep")
     render_tester_panel_jax()
     if st.button("🖨️ Generate PDF", key="j_gen_pdf"):
