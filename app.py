@@ -514,6 +514,33 @@ def render_technician_sidebar():
         st.sidebar.success(f"Loaded: {selected}")
         st.rerun()
 
+    # ── Delete profile (outside expander, with confirm step) ──────────────
+    if selected:
+        confirm_key = "_confirm_delete_profile"
+        if not st.session_state.get(confirm_key, False):
+            if st.sidebar.button("🗑️ Delete Profile", key="delete_profile_btn"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+        else:
+            st.sidebar.warning(f"Delete **{selected}**? This cannot be undone.")
+            col_yes, col_no = st.sidebar.columns(2)
+            with col_yes:
+                if st.button("✅ Yes, delete", key="confirm_delete_yes"):
+                    ok, msg = delete_technician_profile(selected)
+                    st.session_state[confirm_key] = False
+                    if ok:
+                        st.session_state["_sidebar_tech_sel"] = ""
+                        st.session_state["_last_loaded_tech"] = None
+                        clear_signature()
+                        st.sidebar.success("Profile deleted.")
+                    else:
+                        st.sidebar.warning(msg)
+                    st.rerun()
+            with col_no:
+                if st.button("❌ Cancel", key="confirm_delete_no"):
+                    st.session_state[confirm_key] = False
+                    st.rerun()
+
     st.sidebar.divider()
     with st.sidebar.expander("✏️ Edit / Add Profile", expanded=False):
         current = get_technician_profile(selected) if selected else {}
@@ -551,17 +578,6 @@ def render_technician_sidebar():
                 st.rerun()
             else:
                 st.error("Name cannot be empty.")
-
-        if selected and st.button("🗑️ Delete Profile", key="delete_profile_btn"):
-            ok, msg = delete_technician_profile(selected)
-            if ok:
-                st.session_state["_sidebar_tech_sel"] = ""
-                st.session_state["_last_loaded_tech"] = None
-                clear_signature()
-                st.success(msg)
-                st.rerun()
-            else:
-                st.warning(msg)
 
     st.sidebar.divider()
     st.sidebar.markdown("**Signature**")
