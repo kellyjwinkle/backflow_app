@@ -6,10 +6,14 @@ import json, os, base64, requests
 from datetime import date, datetime
 from pypdf import PdfReader, PdfWriter
 from PIL import Image
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
 
 TEMPLATE_UNITED = "backflow_template.pdf"
 TEMPLATE_JAX = "jacksonville_template.pdf"
 TECHNICIANS_FILE = "technicians.json"
+JOBS_FILE = "jobs/jobs.json"
+JOBS_FOLDER = "jobs"
 PAGE_W, PAGE_H = 612, 792
 GITHUB_REPO = "kellyjwinkle/backflow_app"
 GITHUB_API_BASE = "https://api.github.com"
@@ -46,6 +50,10 @@ def _github_headers():
     return headers
 
 
+# ─────────────────────────────────────────────────────────────
+# Technician helpers
+# ─────────────────────────────────────────────────────────────
+
 def load_technicians_from_github():
     url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{TECHNICIANS_FILE}"
     try:
@@ -68,13 +76,11 @@ def save_technicians_to_github(techs: dict, current_sha):
         with open(TECHNICIANS_FILE, "w") as fh:
             json.dump(techs, fh, indent=2)
         return False, "No GITHUB_TOKEN secret configured — saved locally only."
-
     url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{TECHNICIANS_FILE}"
     content_b64 = base64.b64encode(json.dumps(techs, indent=2).encode()).decode()
     payload = {"message": "Update technician profiles via app", "content": content_b64}
     if current_sha:
         payload["sha"] = current_sha
-
     try:
         r = requests.put(url, headers=_github_headers(), json=payload, timeout=10)
         if r.status_code in (200, 201):
@@ -124,6 +130,174 @@ def delete_technician_profile(name: str):
     return False, msg
 
 
+# ─────────────────────────────────────────────────────────────
+# Jobs / autosave helpers
+# ─────────────────────────────────────────────────────────────
+
+def _load_jobs_index():
+    """Return (list_of_job_dicts, sha_or_None) from jobs/jobs.json on GitHub."""
+    url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{JOBS_FILE}"
+    try:
+        r = requests.get(url, headers=_github_headers(), timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            return json.loads(content), data["sha"]
+    except Exception:
+        pass
+    return [], None
+
+
+def _save_jobs_index(jobs: list, current_sha):
+    token = _github_token()
+    if not token:
+        return False, "No GITHUB_TOKEN — cannot save jobs index."
+    url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{JOBS_FILE}"
+    content_b64 = base64.b64encode(json.dumps(jobs, indent=2).encode()).decode()
+    payload = {"message": "Update jobs index via app", "content": content_b64}
+    if current_sha:
+        payload["sha"] = current_sha
+    try:
+        r = requests.put(url, headers=_github_headers(), json=payload, timeout=10)
+        if r.status_code in (200, 201):
+            return True, r.json().get("content", {}).get("sha")
+        return False, f"GitHub error {r.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _upload_pdf_to_github(filename: str, pdf_bytes: bytes):
+    """Upload a PDF to jobs/<filename> on GitHub. Returns (ok, sha_or_error)."""
+    token = _github_token()
+    if not token:
+        return False, "No GITHUB_TOKEN."
+    path = f"{JOBS_FOLDER}/{filename}"
+    # Check if file already exists (need SHA to overwrite)
+    existing_sha = None
+    check_url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{path}"
+    try:
+        cr = requests.get(check_url, headers=_github_headers(), timeout=8)
+        if cr.status_code == 200:
+            existing_sha = cr.json().get("sha")
+    except Exception:
+        pass
+    content_b64 = base64.b64encode(pdf_bytes).decode()
+    payload = {"message": f"Autosave job PDF: {filename}", "content": content_b64}
+    if existing_sha:
+        payload["sha"] = existing_sha
+    try:
+        r = requests.put(check_url, headers=_github_headers(), json=payload, timeout=15)
+        if r.status_code in (200, 201):
+            html_url = r.json().get("content", {}).get("html_url", "")
+            return True, html_url
+        return False, f"GitHub error {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def autosave_job(form_data: dict, pdf_bytes: bytes, form_type: str):
+    """
+    Save PDF to jobs/ and append a summary row to jobs/jobs.json.
+    Returns (ok: bool, message: str, pdf_filename: str).
+    """
+    # Build filename
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if form_type == "united":
+        cust = form_data.get("customer_name", "unknown").replace(" ", "_").replace("/", "-")
+        filename = f"united_{cust}_{ts}.pdf"
+    else:
+        prem = form_data.get("premises_name", "unknown").replace(" ", "_").replace("/", "-")
+        filename = f"jax_{prem}_{ts}.pdf"
+
+    # Upload PDF
+    pdf_ok, pdf_result = _upload_pdf_to_github(filename, pdf_bytes)
+    if not pdf_ok:
+        return False, f"PDF upload failed: {pdf_result}", filename
+
+    # Append to jobs index
+    jobs, jobs_sha = _load_jobs_index()
+    job_entry = {
+        "filename": filename,
+        "form_type": form_type,
+        "saved_at": datetime.now().strftime("%m/%d/%Y %H:%M"),
+        "technician": form_data.get("technician", ""),
+        "date": form_data.get("date") or form_data.get("signature_date", ""),
+        "customer": form_data.get("customer_name") or form_data.get("premises_name", ""),
+        "address": form_data.get("street_address") or form_data.get("service_address", ""),
+        "serial_number": form_data.get("serial_number", ""),
+        "assembly_type": form_data.get("assembly_type") or form_data.get("device_type", ""),
+        "assembly_result": form_data.get("assembly_result", ""),
+        "pdf_url": pdf_result,
+    }
+    jobs.append(job_entry)
+    idx_ok, new_sha = _save_jobs_index(jobs, jobs_sha)
+    if not idx_ok:
+        return True, f"PDF saved but index update failed: {new_sha}", filename
+
+    # Cache in session so the Jobs tab shows it immediately without a reload
+    st.session_state["_jobs_cache"] = jobs
+    return True, f"Job saved ✓ ({filename})", filename
+
+
+def load_jobs_cached():
+    if "_jobs_cache" not in st.session_state:
+        jobs, _ = _load_jobs_index()
+        st.session_state["_jobs_cache"] = jobs
+    return st.session_state["_jobs_cache"]
+
+
+def build_jobs_excel(jobs: list) -> bytes:
+    """Build an .xlsx summary of all saved jobs."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Job Summary"
+
+    headers = [
+        "Saved At", "Form Type", "Date", "Technician", "Customer / Premises",
+        "Address", "Serial Number", "Assembly Type", "Result", "PDF Filename",
+    ]
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_font = Font(color="FFFFFF", bold=True)
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_idx, job in enumerate(jobs, 2):
+        ws.cell(row=row_idx, column=1, value=job.get("saved_at", ""))
+        ws.cell(row=row_idx, column=2, value=job.get("form_type", "").upper())
+        ws.cell(row=row_idx, column=3, value=job.get("date", ""))
+        ws.cell(row=row_idx, column=4, value=job.get("technician", ""))
+        ws.cell(row=row_idx, column=5, value=job.get("customer", ""))
+        ws.cell(row=row_idx, column=6, value=job.get("address", ""))
+        ws.cell(row=row_idx, column=7, value=job.get("serial_number", ""))
+        ws.cell(row=row_idx, column=8, value=job.get("assembly_type", ""))
+        ws.cell(row=row_idx, column=9, value=job.get("assembly_result", ""))
+        ws.cell(row=row_idx, column=10, value=job.get("filename", ""))
+        # Color result cell
+        result_cell = ws.cell(row=row_idx, column=9)
+        if job.get("assembly_result") == "PASSED":
+            result_cell.fill = PatternFill("solid", fgColor="C6EFCE")
+            result_cell.font = Font(color="276221")
+        elif job.get("assembly_result") == "FAILED":
+            result_cell.fill = PatternFill("solid", fgColor="FFC7CE")
+            result_cell.font = Font(color="9C0006")
+
+    # Auto-width columns
+    for col in ws.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=0)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────
+# PDF field maps
+# ─────────────────────────────────────────────────────────────
+
 UNITED_TEXT_FIELDS = {
     "date": (135, 583, 8), "branch": (235, 583, 8), "ahj": (437, 583, 8),
     "customer_name": (200, 567, 8), "street_address": (200, 551, 8), "location": (200, 533, 8),
@@ -170,8 +344,6 @@ JAX_CHECKBOXES = {
     "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
 }
 
-# All widget keys used in the tester display panels — must be cleared when a profile loads
-# so Streamlit re-reads the value= param from the updated form dict instead of its cache.
 UNITED_TESTER_DISPLAY_KEYS = [
     "u_gmfg_display", "u_gsn_display", "u_cal_display",
     "u_tech_display", "u_cert_display", "u_recert_display",
@@ -181,7 +353,6 @@ JAX_TESTER_DISPLAY_KEYS = [
     "j_rb_display", "j_rco_display", "j_rc_display",
     "j_ftn_display", "j_fco_display", "j_fc_display",
 ]
-# Legacy editable widget keys (kept for backward compat clearing)
 UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
 JAX_TESTER_WIDGET_KEYS = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
 
@@ -192,6 +363,10 @@ JAX_TESTER_MAP = {
     "final_tester_name": "technician", "final_company": "company", "final_cert": "cert_no",
 }
 
+
+# ─────────────────────────────────────────────────────────────
+# Drawing helpers
+# ─────────────────────────────────────────────────────────────
 
 def draw_x(c, bx, by, size=3.8):
     c.setStrokeColorRGB(1, 0, 0)
@@ -221,6 +396,10 @@ def wrap_text(text, w=58):
         lines.append(line)
     return lines
 
+
+# ─────────────────────────────────────────────────────────────
+# Form / session helpers
+# ─────────────────────────────────────────────────────────────
 
 def _init_form(key, defaults=None):
     if key not in st.session_state:
@@ -296,22 +475,15 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
 
 
 def apply_profile_to_forms(profile: dict):
-    """Apply a technician profile dict to both form dicts and clear all stale widget keys."""
     if not profile:
         return
-
-    # Persist signature globally
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
-
-    # --- United form ---
     _init_form("united_form")
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
-
-    # --- JAX form ---
     _init_form("jax_form")
     jax = st.session_state["jax_form"]
     for jk, pk in JAX_TESTER_MAP.items():
@@ -319,16 +491,15 @@ def apply_profile_to_forms(profile: dict):
     for tk in TESTER_KEYS:
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
-
-    # Clear ALL tester-related widget keys (both old editable keys and new display keys)
-    # so Streamlit re-reads value= from the updated form dict on the next render.
     _clear_widget_keys(
-        UNITED_TESTER_WIDGET_KEYS
-        + JAX_TESTER_WIDGET_KEYS
-        + UNITED_TESTER_DISPLAY_KEYS
-        + JAX_TESTER_DISPLAY_KEYS
+        UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
+        + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
     )
 
+
+# ─────────────────────────────────────────────────────────────
+# PDF generators
+# ─────────────────────────────────────────────────────────────
 
 def generate_united_pdf(form_data: dict) -> bytes:
     reader = PdfReader(TEMPLATE_UNITED)
@@ -338,55 +509,43 @@ def generate_united_pdf(form_data: dict) -> bytes:
     c = canvas.Canvas(packet, pagesize=(PAGE_W, PAGE_H))
     for field, (x, y, sz) in UNITED_TEXT_FIELDS.items():
         put_text(c, form_data.get(field, ""), x, y, sz)
-
     atype = form_data.get("assembly_type", "")
     if atype == "RP": draw_x(c, *UNITED_CHECKBOXES["RP"])
     elif atype == "DC": draw_x(c, *UNITED_CHECKBOXES["DC"])
     elif atype == "PVB": draw_x(c, *UNITED_CHECKBOXES["PVB"])
     elif atype == "SVB": draw_x(c, *UNITED_CHECKBOXES["SVB"])
-
     svc = form_data.get("system_service", "")
     if svc == "Fire": draw_x(c, *UNITED_CHECKBOXES["FIRE"])
     elif svc == "Domestic": draw_x(c, *UNITED_CHECKBOXES["DOMESTIC"])
     elif svc == "Irrigation": draw_x(c, *UNITED_CHECKBOXES["IRRIGATION"])
     elif svc == "Attraction": draw_x(c, *UNITED_CHECKBOXES["ATTRACTION"])
-
     bypass = form_data.get("bypass", "")
     if bypass == "Yes": draw_x(c, *UNITED_CHECKBOXES["BYPASS_YES"])
     elif bypass == "No": draw_x(c, *UNITED_CHECKBOXES["BYPASS_NO"])
-
     cv1r = form_data.get("cv1_result", "")
     if cv1r == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["CV1_CLOSED"])
     elif cv1r == "Leaked": draw_x(c, *UNITED_CHECKBOXES["CV1_LEAKED"])
-
     cv2r = form_data.get("cv2_result", "")
     if cv2r == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["CV2_CLOSED"])
     elif cv2r == "Leaked": draw_x(c, *UNITED_CHECKBOXES["CV2_LEAKED"])
-
     rvr = form_data.get("rv_result", "")
     if rvr == "Opened": draw_x(c, *UNITED_CHECKBOXES["RV_OPENED"])
     elif rvr == "Did Not Open": draw_x(c, *UNITED_CHECKBOXES["RV_DIDNOTOPEN"])
-
     rvo = form_data.get("rv_out_result", "")
     if rvo == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["RV_OUT_CLOSED"])
     elif rvo == "Leaked": draw_x(c, *UNITED_CHECKBOXES["RV_OUT_LEAKED"])
-
     rvi = form_data.get("rv_in_result", "")
     if rvi == "Closed Tight": draw_x(c, *UNITED_CHECKBOXES["RV_IN_CLOSED"])
     elif rvi == "Leaked": draw_x(c, *UNITED_CHECKBOXES["RV_IN_LEAKED"])
-
     pai = form_data.get("pvb_ai_result", "")
     if pai == "Opened": draw_x(c, *UNITED_CHECKBOXES["PVB_AI_OPENED"])
     elif pai == "Did Not Open": draw_x(c, *UNITED_CHECKBOXES["PVB_AI_CLOSED"])
-
     pcv = form_data.get("pvb_cv_result", "")
     if pcv == "Leaked": draw_x(c, *UNITED_CHECKBOXES["PVB_CV_LEAKED"])
     elif pcv == "Held": draw_x(c, *UNITED_CHECKBOXES["PVB_CV_HELD"])
-
     ar = form_data.get("assembly_result", "")
     if ar == "PASSED": draw_x(c, *UNITED_CHECKBOXES["PASSED"])
     elif ar == "FAILED": draw_x(c, *UNITED_CHECKBOXES["FAILED"])
-
     repair = form_data.get("repair_desc", "")
     if repair:
         bx, by, bh, bl, bw = UNITED_REPAIR_BOX
@@ -395,11 +554,9 @@ def generate_united_pdf(form_data: dict) -> bytes:
         c.setFillColorRGB(1, 0, 0)
         for i, ln in enumerate(lines[:bl]):
             c.drawString(bx, by - i * bh, ln)
-
     sig_reader = get_signature_image_reader(form_data)
     if sig_reader:
         c.drawImage(sig_reader, UNITED_SIG_X, UNITED_SIG_Y, width=UNITED_SIG_W, height=UNITED_SIG_H, mask="auto")
-
     c.save()
     packet.seek(0)
     overlay_reader = PdfReader(packet)
@@ -418,40 +575,32 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     c = canvas.Canvas(packet, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
     for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
         put_text(c, form_data.get(field, ""), x, y, sz)
-
     comm_tp = form_data.get("comm_test_purpose", "")
     if comm_tp == "Annual": draw_x(c, *JAX_CHECKBOXES["COMM_ANNUAL"])
     elif comm_tp == "Repair": draw_x(c, *JAX_CHECKBOXES["COMM_REPAIR"])
     elif comm_tp == "Replacement": draw_x(c, *JAX_CHECKBOXES["COMM_REPLACEMENT"])
     elif comm_tp == "New Install": draw_x(c, *JAX_CHECKBOXES["COMM_NEW_INSTALL"])
-
     comm_st = form_data.get("comm_service_type", "")
     if comm_st == "Fire": draw_x(c, *JAX_CHECKBOXES["COMM_FIRE"])
     elif comm_st == "Irrigation": draw_x(c, *JAX_CHECKBOXES["COMM_IRRIGATION"])
     elif comm_st == "Process": draw_x(c, *JAX_CHECKBOXES["COMM_PROCESS"])
     elif comm_st == "Potable": draw_x(c, *JAX_CHECKBOXES["COMM_POTABLE"])
-
     comm_fp = form_data.get("comm_fire_bypass", "")
     if comm_fp: draw_x(c, *JAX_CHECKBOXES["COMM_FIRE_BYPASS"])
-
     comm_rc = form_data.get("comm_reclaim", "")
     if comm_rc == "Yes": draw_x(c, *JAX_CHECKBOXES["RECLAIM_YES"])
     elif comm_rc == "No": draw_x(c, *JAX_CHECKBOXES["RECLAIM_NO"])
-
     res_tp = form_data.get("res_test_purpose", "")
     if res_tp == "Annual": draw_x(c, *JAX_CHECKBOXES["RES_ANNUAL"])
     elif res_tp == "Repair": draw_x(c, *JAX_CHECKBOXES["RES_REPAIR"])
     elif res_tp == "Replacement": draw_x(c, *JAX_CHECKBOXES["RES_REPLACEMENT"])
     elif res_tp == "New Install": draw_x(c, *JAX_CHECKBOXES["RES_NEW_INSTALL"])
-
     res_st = form_data.get("res_service_type", "")
     if res_st == "Potable": draw_x(c, *JAX_CHECKBOXES["RES_POTABLE"])
     elif res_st == "Irrigation": draw_x(c, *JAX_CHECKBOXES["RES_IRRIGATION"])
-
     res_rc = form_data.get("res_reclaim", "")
     if res_rc == "Yes": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_YES"])
     elif res_rc == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
-
     icv1 = form_data.get("init_cv1_result", "")
     if icv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
     icv2 = form_data.get("init_cv2_result", "")
@@ -462,7 +611,6 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     ipvb = form_data.get("init_pvb_result", "")
     if ipvb == "Air Inlet Opened": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIOPEN"])
     elif ipvb == "Air Inlet Did Not": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
-
     fcv1 = form_data.get("final_cv1_result", "")
     if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
     fcv2 = form_data.get("final_cv2_result", "")
@@ -471,15 +619,12 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     if frv == "Opened": draw_x(c, *JAX_CHECKBOXES["FINAL_RV_OPENED"])
     fpvb = form_data.get("final_pvb_result", "")
     if fpvb == "Satisfactory": draw_x(c, *JAX_CHECKBOXES["FINAL_PVB_SAT"])
-
     ar = form_data.get("assembly_result", "")
     if ar == "PASSED": draw_x(c, *JAX_CHECKBOXES["JAX_PASSED"])
     elif ar == "FAILED": draw_x(c, *JAX_CHECKBOXES["JAX_FAILED"])
-
     sig_reader = get_signature_image_reader(form_data)
     if sig_reader:
         c.drawImage(sig_reader, JAX_SIG_X, JAX_SIG_Y, width=JAX_SIG_W, height=JAX_SIG_H, mask="auto")
-
     c.save()
     packet.seek(0)
     overlay_reader = PdfReader(packet)
@@ -490,31 +635,30 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     return out.getvalue()
 
 
+# ─────────────────────────────────────────────────────────────
+# Sidebar
+# ─────────────────────────────────────────────────────────────
+
 def render_technician_sidebar():
     st.sidebar.title("👤 Technician Profile")
     names = get_technician_names()
     prev_sel = st.session_state.get("_sidebar_tech_sel", "")
     if prev_sel not in names:
         prev_sel = ""
-
     selected = st.sidebar.selectbox("Select technician", names, index=names.index(prev_sel) if prev_sel in names else 0, key="sidebar_tech_select")
     st.session_state["_sidebar_tech_sel"] = selected
-
     last_loaded = st.session_state.get("_last_loaded_tech", None)
     if selected and selected != last_loaded:
         profile = get_technician_profile(selected)
         apply_profile_to_forms(profile)
         st.session_state["_last_loaded_tech"] = selected
         st.rerun()
-
     if st.sidebar.button("📥 Reload Profile", key="load_profile_btn", disabled=not bool(selected)):
         profile = get_technician_profile(selected)
         apply_profile_to_forms(profile)
         st.session_state["_last_loaded_tech"] = selected
         st.sidebar.success(f"Loaded: {selected}")
         st.rerun()
-
-    # ── Delete profile (outside expander, with confirm step) ──────────────
     if selected:
         confirm_key = "_confirm_delete_profile"
         if not st.session_state.get(confirm_key, False):
@@ -540,7 +684,6 @@ def render_technician_sidebar():
                 if st.button("❌ Cancel", key="confirm_delete_no"):
                     st.session_state[confirm_key] = False
                     st.rerun()
-
     st.sidebar.divider()
     with st.sidebar.expander("✏️ Edit / Add Profile", expanded=False):
         current = get_technician_profile(selected) if selected else {}
@@ -551,11 +694,9 @@ def render_technician_sidebar():
         prof_gmfg = st.text_input("Gauge Mfg", value=current.get("gauge_mfg", ""), key="prof_gmfg")
         prof_gsn = st.text_input("Gauge SN", value=current.get("gauge_serial", ""), key="prof_gsn")
         prof_cal = st.text_input("Date Cal", value=current.get("date_cal", ""), key="prof_cal")
-
         if current.get("signature_b64"):
             st.caption("Saved profile signature:")
             st.image(base64.b64decode(current["signature_b64"]), width=180)
-
         if st.button("💾 Save Profile", key="save_profile_btn"):
             if prof_name.strip():
                 new_profile = {
@@ -578,13 +719,11 @@ def render_technician_sidebar():
                 st.rerun()
             else:
                 st.error("Name cannot be empty.")
-
     st.sidebar.divider()
     st.sidebar.markdown("**Signature**")
     sig_b64 = st.session_state.get("signature_b64")
     if sig_b64:
         st.sidebar.image(base64.b64decode(sig_b64), caption="Current signature", use_container_width=True)
-
     upload = st.sidebar.file_uploader("Upload signature (PNG preferred)", type=["png", "jpg", "jpeg"], key="sig_upload")
     if upload is not None:
         try:
@@ -595,7 +734,6 @@ def render_technician_sidebar():
             st.sidebar.success("Uploaded signature loaded.")
         except Exception as e:
             st.sidebar.error(f"Could not read uploaded signature: {e}")
-
     st.sidebar.caption("Or draw your signature below:")
     try:
         from streamlit_drawable_canvas import st_canvas
@@ -606,7 +744,6 @@ def render_technician_sidebar():
                 save_signature(arr)
     except ImportError:
         st.sidebar.info("Install streamlit-drawable-canvas for signature support.")
-
     col_sig1, col_sig2 = st.sidebar.columns(2)
     with col_sig1:
         if st.button("🗑️ Clear Sig", key="sb_clear_sig"):
@@ -623,8 +760,11 @@ def render_technician_sidebar():
                 st.sidebar.warning(msg)
 
 
+# ─────────────────────────────────────────────────────────────
+# Tester panels
+# ─────────────────────────────────────────────────────────────
+
 def render_tester_panel_united():
-    """Display-only tester/technician panel for the United form, populated from the loaded profile."""
     _init_form("united_form")
     form = st.session_state["united_form"]
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
@@ -651,7 +791,6 @@ def render_tester_panel_united():
 
 
 def render_tester_panel_jax():
-    """Display-only tester/technician panel for the JAX form, populated from the loaded profile."""
     _init_form("jax_form")
     form = st.session_state["jax_form"]
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
@@ -689,6 +828,10 @@ def render_tester_panel_jax():
         st.caption("⚠️ No signature loaded. Upload or draw one in the sidebar and save it to the profile.")
 
 
+# ─────────────────────────────────────────────────────────────
+# Form tabs
+# ─────────────────────────────────────────────────────────────
+
 def render_united_tab():
     _init_form("united_form")
     form = st.session_state["united_form"]
@@ -711,7 +854,6 @@ def render_united_tab():
     with col7:
         clearable_input("Model", "united_form", "model", "u_mdl")
         clearable_input("Size", "united_form", "size", "u_sz")
-
     atype_opts = ["", "RP", "DC", "PVB", "SVB"]
     svc_opts = ["", "Fire", "Domestic", "Irrigation", "Attraction"]
     bp_opts = ["", "Yes", "No"]
@@ -722,7 +864,6 @@ def render_united_tab():
         form["system_service"] = st.selectbox("System Service", svc_opts, index=svc_opts.index(form.get("system_service", "")) if form.get("system_service", "") in svc_opts else 0, key="u_system_service")
     with col12:
         form["bypass"] = st.selectbox("Fire Bypass", bp_opts, index=bp_opts.index(form.get("bypass", "")) if form.get("bypass", "") in bp_opts else 0, key="u_bypass")
-
     st.divider()
     st.markdown("**Test Results**")
     atype = form.get("assembly_type", "")
@@ -772,18 +913,25 @@ def render_united_tab():
     form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0, key="u_assembly_result")
     clearable_input("Repair Description", "united_form", "repair_desc", "u_rep")
     render_tester_panel_united()
-    if st.button("🖨️ Generate PDF", key="u_gen_pdf"):
-        try:
-            selected_profile = st.session_state.get("_sidebar_tech_sel", "")
-            if not selected_profile:
-                st.error("You must select a technician profile before generating a PDF.")
-            else:
+    if st.button("🖨️ Generate & Save PDF", key="u_gen_pdf"):
+        selected_profile = st.session_state.get("_sidebar_tech_sel", "")
+        if not selected_profile:
+            st.error("You must select a technician profile before generating a PDF.")
+        else:
+            try:
                 form["signature_b64"] = st.session_state.get("signature_b64", form.get("signature_b64", ""))
                 pdf_bytes = generate_united_pdf(form)
-                fname = f"backflow_{form.get('customer_name','report').replace(' ','_')}.pdf"
+                # Autosave
+                save_ok, save_msg, fname = autosave_job(form, pdf_bytes, "united")
+                if save_ok:
+                    st.success(save_msg)
+                else:
+                    st.warning(save_msg)
+                # Download button always appears
+                cust = form.get('customer_name', 'report').replace(' ', '_')
                 st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="u_dl_pdf")
-        except Exception as e:
-            st.error(f"PDF error: {e}")
+            except Exception as e:
+                st.error(f"PDF error: {e}")
 
 
 def render_jax_tab():
@@ -882,28 +1030,88 @@ def render_jax_tab():
     form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0, key="j_assembly_result")
     clearable_input("Repairs / Notes", "jax_form", "repairs", "j_rep")
     render_tester_panel_jax()
-    if st.button("🖨️ Generate PDF", key="j_gen_pdf"):
-        try:
-            selected_profile = st.session_state.get("_sidebar_tech_sel", "")
-            if not selected_profile:
-                st.error("You must select a technician profile before generating a PDF.")
-            else:
+    if st.button("🖨️ Generate & Save PDF", key="j_gen_pdf"):
+        selected_profile = st.session_state.get("_sidebar_tech_sel", "")
+        if not selected_profile:
+            st.error("You must select a technician profile before generating a PDF.")
+        else:
+            try:
                 form["signature_b64"] = st.session_state.get("signature_b64", form.get("signature_b64", ""))
                 pdf_bytes = generate_jax_pdf(form)
-                fname = f"jax_{form.get('premises_name','report').replace(' ','_')}.pdf"
+                save_ok, save_msg, fname = autosave_job(form, pdf_bytes, "jax")
+                if save_ok:
+                    st.success(save_msg)
+                else:
+                    st.warning(save_msg)
                 st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="j_dl_pdf")
-        except Exception as e:
-            st.error(f"PDF error: {e}")
+            except Exception as e:
+                st.error(f"PDF error: {e}")
 
+
+# ─────────────────────────────────────────────────────────────
+# Jobs tab
+# ─────────────────────────────────────────────────────────────
+
+def render_jobs_tab():
+    st.subheader("📁 Saved Jobs")
+
+    col_refresh, col_excel = st.columns([1, 2])
+    with col_refresh:
+        if st.button("🔄 Refresh", key="jobs_refresh"):
+            st.session_state.pop("_jobs_cache", None)
+            st.rerun()
+
+    jobs = load_jobs_cached()
+
+    if not jobs:
+        st.info("No jobs saved yet. Generate a PDF from the United Fire or Jacksonville tab to autosave a job here.")
+        return
+
+    with col_excel:
+        excel_bytes = build_jobs_excel(jobs)
+        today = datetime.now().strftime("%Y%m%d")
+        st.download_button(
+            "📊 Download Excel Summary",
+            excel_bytes,
+            f"backflow_jobs_{today}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="jobs_excel_dl",
+        )
+
+    st.caption(f"{len(jobs)} job(s) on record")
+    st.divider()
+
+    # Show newest first
+    for job in reversed(jobs):
+        result = job.get("assembly_result", "")
+        result_icon = "✅" if result == "PASSED" else ("❌" if result == "FAILED" else "❔")
+        with st.expander(f"{result_icon} {job.get('customer', 'Unknown')} — {job.get('date', '')} [{job.get('form_type','').upper()}]", expanded=False):
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Result", result or "—")
+            c2.metric("Technician", job.get("technician", "—"))
+            c3.metric("Saved", job.get("saved_at", "—"))
+            st.write(f"**Address:** {job.get('address', '—')}")
+            st.write(f"**Serial #:** {job.get('serial_number', '—')} | **Assembly:** {job.get('assembly_type', '—')}")
+            st.write(f"**File:** `{job.get('filename', '—')}`")
+            pdf_url = job.get("pdf_url", "")
+            if pdf_url:
+                st.markdown(f"[🔗 View PDF on GitHub]({pdf_url})")
+
+
+# ─────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────
 
 def main():
     st.set_page_config(page_title="Backflow Test Reports", page_icon="📋", layout="wide")
     render_technician_sidebar()
-    tab_united, tab_jax = st.tabs(["🔵 United Fire", "🔴 Jacksonville (JEA)"])
+    tab_united, tab_jax, tab_jobs = st.tabs(["🔵 United Fire", "🔴 Jacksonville (JEA)", "📁 Jobs"])
     with tab_united:
         render_united_tab()
     with tab_jax:
         render_jax_tab()
+    with tab_jobs:
+        render_jobs_tab()
 
 
 if __name__ == "__main__":
