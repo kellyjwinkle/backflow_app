@@ -911,7 +911,7 @@ def render_technician_sidebar():
 
 
 # ─────────────────────────────────────────────────────────────
-# Tester panels
+# Tester panels — editable, with Reset from Profile button
 # ─────────────────────────────────────────────────────────────
 
 def render_tester_panel_united():
@@ -923,16 +923,31 @@ def render_tester_panel_united():
     if not selected_tech:
         st.warning("Select a technician profile in the sidebar to populate tester information.")
         return
-    st.caption(f"Profile loaded: **{selected_tech}**")
+    col_caption, col_reset = st.columns([0.75, 0.25])
+    with col_caption:
+        st.caption(f"Profile loaded: **{selected_tech}** — fields are editable for this job only.")
+    with col_reset:
+        if st.button("🔄 Reset from Profile", key="u_reset_tester", help="Restore all tester fields from the saved profile"):
+            profile = get_technician_profile(selected_tech)
+            for tk in TESTER_KEYS:
+                form[tk] = profile.get(tk, "")
+            _clear_widget_keys(UNITED_TESTER_DISPLAY_KEYS)
+            st.rerun()
     col1, col2 = st.columns(2)
     with col1:
-        st.text_input("Gauge Mfg",       value=form.get("gauge_mfg",    ""), disabled=True, key="u_gmfg_display")
-        st.text_input("Gauge Serial",     value=form.get("gauge_serial", ""), disabled=True, key="u_gsn_display")
-        st.text_input("Date Calibrated",  value=form.get("date_cal",     ""), disabled=True, key="u_cal_display")
+        v = st.text_input("Gauge Mfg",      value=form.get("gauge_mfg",    ""), key="u_gmfg_display")
+        form["gauge_mfg"] = v
+        v = st.text_input("Gauge Serial",   value=form.get("gauge_serial", ""), key="u_gsn_display")
+        form["gauge_serial"] = v
+        v = st.text_input("Date Calibrated", value=form.get("date_cal",    ""), key="u_cal_display")
+        form["date_cal"] = v
     with col2:
-        st.text_input("Technician",       value=form.get("technician",   ""), disabled=True, key="u_tech_display")
-        st.text_input("Cert No.",         value=form.get("cert_no",      ""), disabled=True, key="u_cert_display")
-        st.text_input("Re-Cert Date",     value=form.get("recert",       ""), disabled=True, key="u_recert_display")
+        v = st.text_input("Technician",     value=form.get("technician",   ""), key="u_tech_display")
+        form["technician"] = v
+        v = st.text_input("Cert No.",       value=form.get("cert_no",      ""), key="u_cert_display")
+        form["cert_no"] = v
+        v = st.text_input("Re-Cert Date",   value=form.get("recert",       ""), key="u_recert_display")
+        form["recert"] = v
     sig_b64 = st.session_state.get("signature_b64") or form.get("signature_b64")
     if sig_b64:
         st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
@@ -949,28 +964,46 @@ def render_tester_panel_jax():
     if not selected_tech:
         st.warning("Select a technician profile in the sidebar to populate tester information.")
         return
-    st.caption(f"Profile loaded: **{selected_tech}**")
+    col_caption, col_reset = st.columns([0.75, 0.25])
+    with col_caption:
+        st.caption(f"Profile loaded: **{selected_tech}** — fields are editable for this job only.")
+    with col_reset:
+        if st.button("🔄 Reset from Profile", key="j_reset_tester", help="Restore all tester fields from the saved profile"):
+            profile = get_technician_profile(selected_tech)
+            for jk, pk in JAX_TESTER_MAP.items():
+                form[jk] = profile.get(pk, "")
+            _clear_widget_keys(JAX_TESTER_DISPLAY_KEYS)
+            st.rerun()
     col_itn, col_ico, col_ic = st.columns(3)
     with col_itn:
-        st.text_input("Init Tester Name", value=form.get("init_tester_name", ""), disabled=True, key="j_itn_display")
+        v = st.text_input("Init Tester Name", value=form.get("init_tester_name", ""), key="j_itn_display")
+        form["init_tester_name"] = v
     with col_ico:
-        st.text_input("Init Company",     value=form.get("init_company",    ""), disabled=True, key="j_ico_display")
+        v = st.text_input("Init Company",     value=form.get("init_company",    ""), key="j_ico_display")
+        form["init_company"] = v
     with col_ic:
-        st.text_input("Init Cert",        value=form.get("init_cert",       ""), disabled=True, key="j_ic_display")
+        v = st.text_input("Init Cert",        value=form.get("init_cert",       ""), key="j_ic_display")
+        form["init_cert"] = v
     col_rb, col_rco, col_rc = st.columns(3)
     with col_rb:
-        st.text_input("Repaired By",      value=form.get("repaired_by",     ""), disabled=True, key="j_rb_display")
+        v = st.text_input("Repaired By",      value=form.get("repaired_by",     ""), key="j_rb_display")
+        form["repaired_by"] = v
     with col_rco:
-        st.text_input("Repair Company",   value=form.get("repair_company",  ""), disabled=True, key="j_rco_display")
+        v = st.text_input("Repair Company",   value=form.get("repair_company",  ""), key="j_rco_display")
+        form["repair_company"] = v
     with col_rc:
-        st.text_input("Repair Cert",      value=form.get("repair_cert",     ""), disabled=True, key="j_rc_display")
+        v = st.text_input("Repair Cert",      value=form.get("repair_cert",     ""), key="j_rc_display")
+        form["repair_cert"] = v
     col_ftn, col_fco, col_fc = st.columns(3)
     with col_ftn:
-        st.text_input("Final Tester Name",value=form.get("final_tester_name",""), disabled=True, key="j_ftn_display")
+        v = st.text_input("Final Tester Name", value=form.get("final_tester_name", ""), key="j_ftn_display")
+        form["final_tester_name"] = v
     with col_fco:
-        st.text_input("Final Company",    value=form.get("final_company",   ""), disabled=True, key="j_fco_display")
+        v = st.text_input("Final Company",    value=form.get("final_company",   ""), key="j_fco_display")
+        form["final_company"] = v
     with col_fc:
-        st.text_input("Final Cert",       value=form.get("final_cert",      ""), disabled=True, key="j_fc_display")
+        v = st.text_input("Final Cert",       value=form.get("final_cert",      ""), key="j_fc_display")
+        form["final_cert"] = v
     sig_b64 = st.session_state.get("signature_b64") or form.get("signature_b64")
     if sig_b64:
         st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
@@ -1219,7 +1252,15 @@ def render_jax_tab():
     form["final_pvb_result"] = st.selectbox("Final PVB", fpvb_opts, index=fpvb_opts.index(form.get("final_pvb_result", "")) if form.get("final_pvb_result", "") in fpvb_opts else 0, key="j_final_pvb_result")
     ar_opts = ["", "PASSED", "FAILED"]
     form["assembly_result"] = st.selectbox("Assembly Result", ar_opts, index=ar_opts.index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ar_opts else 0, key="j_assembly_result")
-    clearable_input("Repairs / Notes", "jax_form", "repairs", "j_rep")
+
+    # ── Repairs / Notes — only shown when assembly FAILED ────
+    if form.get("assembly_result") == "FAILED":
+        clearable_input("Repairs / Notes", "jax_form", "repairs", "j_rep")
+    else:
+        # Clear stale repair text if result is not FAILED
+        form.pop("repairs", None)
+        st.session_state.pop("j_rep", None)
+
     render_tester_panel_jax()
     if st.button("🖨️ Generate & Save PDF", key="j_gen_pdf"):
         selected_profile = st.session_state.get("_sidebar_tech_sel", "")
