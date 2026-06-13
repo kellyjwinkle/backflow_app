@@ -292,7 +292,6 @@ def clear_all_reports() -> tuple[bool, str]:
             else:
                 errors.append(fname)
 
-    # Reset the index to empty list
     ok, result = _save_jobs_index([], jobs_sha)
     if not ok:
         return False, f"PDFs cleared ({deleted}) but failed to reset index: {result}"
@@ -350,29 +349,22 @@ def build_jobs_excel(jobs: list) -> bytes:
     return buf.getvalue()
 
 
-def build_zip_with_pdfs(jobs: list) -> bytes:
+def build_zip_for_selected(selected_jobs: list, all_jobs: list) -> bytes:
     """
-    Build a ZIP containing all PDFs fetched from GitHub plus an Excel summary.
-    Only includes jobs from today.
+    Build a ZIP containing PDFs for the selected jobs plus an Excel summary of ALL jobs.
     """
     today_str = datetime.now().strftime("%Y-%m-%d")
-    today_jobs = [j for j in jobs if j.get("saved_date", "") == today_str]
-
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Excel summary (all jobs, not just today)
-        excel_bytes = build_jobs_excel(jobs)
+        excel_bytes = build_jobs_excel(all_jobs)
         zf.writestr(f"backflow_jobs_{today_str}.xlsx", excel_bytes)
-
-        # PDFs for today
-        for job in today_jobs:
+        for job in selected_jobs:
             fname = job.get("filename", "")
             if not fname:
                 continue
             pdf_bytes = _fetch_pdf_from_github(fname)
             if pdf_bytes:
                 zf.writestr(fname, pdf_bytes)
-
     buf.seek(0)
     return buf.getvalue()
 
@@ -1015,13 +1007,11 @@ def render_united_tab():
                     st.success(save_msg)
                 else:
                     st.warning(save_msg)
-                # Store for immediate download
                 st.session_state["_last_pdf_bytes"] = pdf_bytes
                 st.session_state["_last_pdf_name"] = fname
             except Exception as e:
                 st.error(f"PDF error: {e}")
 
-    # Always show download button if PDF was just generated this session
     if st.session_state.get("_last_pdf_bytes") and st.session_state.get("_last_pdf_name", "").startswith("united_"):
         st.download_button(
             "📥 Download PDF to Device",
@@ -1167,7 +1157,7 @@ def render_jobs_tab():
     today_display = datetime.now().strftime("%B %d, %Y")
 
     # ── Top action bar ────────────────────────────────────────
-    col_refresh, col_zip, col_excel, col_clear = st.columns([1, 2, 2, 2])
+    col_refresh, col_excel, col_clear = st.columns([1, 2, 2])
 
     with col_refresh:
         if st.button("🔄 Refresh", key="jobs_refresh"):
@@ -1176,21 +1166,6 @@ def render_jobs_tab():
 
     jobs = load_jobs_cached()
     today_jobs = [j for j in jobs if j.get("saved_date", "") == today_str]
-
-    with col_zip:
-        if today_jobs:
-            with st.spinner("Building ZIP..."):
-                zip_bytes = build_zip_with_pdfs(jobs)
-            st.download_button(
-                f"📦 Download Today's ZIP ({len(today_jobs)} PDF{'s' if len(today_jobs) != 1 else ''} + Excel)",
-                zip_bytes,
-                f"backflow_jobs_{today_str}.zip",
-                "application/zip",
-                key="jobs_zip_dl",
-            )
-        else:
-            st.button("📦 Download Today's ZIP", disabled=True, key="jobs_zip_disabled",
-                      help="No jobs generated today yet.")
 
     with col_excel:
         if jobs:
@@ -1233,23 +1208,67 @@ def render_jobs_tab():
         st.info("No jobs saved yet. Generate a PDF from the United Fire or Jacksonville tab to autosave a job here.")
         return
 
-    # ── Today's jobs ──────────────────────────────────────────
+    # ── Today's jobs with checkboxes ─────────────────────────
     if today_jobs:
         st.markdown(f"#### 📅 Today — {today_display} ({len(today_jobs)} job{'s' if len(today_jobs) != 1 else ''})")
-        for job in reversed(today_jobs):
+
+        # Select-all toggle
+        all_key = "_zip_select_all"
+        if st.button("☑️ Select All / None", key="zip_select_all_btn"):
+            current_all = st.session_state.get(all_key, False)
+            st.session_state[all_key] = not current_all
+            for i, job in enumerate(today_jobs):
+                st.session_state[f"_zip_sel_{i}"] = not current_all
+            st.rerun()
+
+        selected_jobs = []
+        for i, job in enumerate(reversed(today_jobs)):
             result = job.get("assembly_result", "")
             result_icon = "✅" if result == "PASSED" else ("❌" if result == "FAILED" else "❔")
-            with st.expander(f"{result_icon} {job.get('customer', 'Unknown')} — {job.get('date', '')} [{job.get('form_type','').upper()}]", expanded=False):
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Result", result or "—")
-                c2.metric("Technician", job.get("technician", "—"))
-                c3.metric("Saved", job.get("saved_at", "—"))
-                st.write(f"**Address:** {job.get('address', '—')}")
-                st.write(f"**Serial #:** {job.get('serial_number', '—')} | **Assembly:** {job.get('assembly_type', '—')}")
-                st.write(f"**File:** `{job.get('filename', '—')}`")
-                pdf_url = job.get("pdf_url", "")
-                if pdf_url:
-                    st.markdown(f"[🔗 View PDF on GitHub]({pdf_url})")
+            label = f"{result_icon} {job.get('customer', 'Unknown')} — {job.get('date', '')} [{job.get('form_type','').upper()}]"
+
+            cb_key = f"_zip_sel_{i}"
+            # Default new jobs to checked
+            if cb_key not in st.session_state:
+                st.session_state[cb_key] = True
+
+            col_cb, col_detail = st.columns([0.05, 0.95])
+            with col_cb:
+                checked = st.checkbox("", value=st.session_state[cb_key], key=cb_key, label_visibility="collapsed")
+            with col_detail:
+                with st.expander(label, expanded=False):
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Result", result or "—")
+                    c2.metric("Technician", job.get("technician", "—"))
+                    c3.metric("Saved", job.get("saved_at", "—"))
+                    st.write(f"**Address:** {job.get('address', '—')}")
+                    st.write(f"**Serial #:** {job.get('serial_number', '—')} | **Assembly:** {job.get('assembly_type', '—')}")
+                    st.write(f"**File:** `{job.get('filename', '—')}`")
+                    pdf_url = job.get("pdf_url", "")
+                    if pdf_url:
+                        st.markdown(f"[🔗 View PDF on GitHub]({pdf_url})")
+
+            if checked:
+                selected_jobs.append(job)
+
+        # ZIP download for selected
+        st.markdown("---")
+        n_sel = len(selected_jobs)
+        if n_sel > 0:
+            zip_label = f"📦 Download ZIP ({n_sel} PDF{'s' if n_sel != 1 else ''} selected + Excel)"
+            with st.spinner(f"Building ZIP with {n_sel} PDF(s)..."):
+                zip_bytes = build_zip_for_selected(selected_jobs, jobs)
+            st.download_button(
+                zip_label,
+                zip_bytes,
+                f"backflow_jobs_{today_str}.zip",
+                "application/zip",
+                key="jobs_zip_dl",
+            )
+        else:
+            st.button("📦 Download ZIP", disabled=True, key="jobs_zip_disabled",
+                      help="Check at least one job above to include in the ZIP.")
+
     else:
         st.info(f"No jobs generated today ({today_display}). Previous jobs are in the history below.")
 
