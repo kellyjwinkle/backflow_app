@@ -2,7 +2,7 @@ import streamlit as st
 from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-import json, os, base64, requests
+import json, os, base64, requests, zipfile
 from datetime import date, datetime
 from pypdf import PdfReader, PdfWriter
 from PIL import Image
@@ -194,6 +194,39 @@ def _upload_pdf_to_github(filename: str, pdf_bytes: bytes):
         return False, str(e)
 
 
+def _delete_pdf_from_github(filename: str) -> bool:
+    """Delete a PDF file from jobs/<filename> on GitHub. Returns True on success."""
+    token = _github_token()
+    if not token:
+        return False
+    path = f"{JOBS_FOLDER}/{filename}"
+    url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{path}"
+    try:
+        cr = requests.get(url, headers=_github_headers(), timeout=8)
+        if cr.status_code != 200:
+            return True  # already gone
+        file_sha = cr.json().get("sha")
+        payload = {"message": f"Clear job PDF: {filename}", "sha": file_sha}
+        r = requests.delete(url, headers=_github_headers(), json=payload, timeout=10)
+        return r.status_code in (200, 201, 204)
+    except Exception:
+        return False
+
+
+def _fetch_pdf_from_github(filename: str) -> bytes | None:
+    """Fetch PDF bytes from jobs/<filename> on GitHub."""
+    path = f"{JOBS_FOLDER}/{filename}"
+    url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{path}"
+    try:
+        r = requests.get(url, headers=_github_headers(), timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            return base64.b64decode(data["content"])
+    except Exception:
+        pass
+    return None
+
+
 def autosave_job(form_data: dict, pdf_bytes: bytes, form_type: str):
     """
     Save PDF to jobs/ and append a summary row to jobs/jobs.json.
@@ -216,6 +249,7 @@ def autosave_job(form_data: dict, pdf_bytes: bytes, form_type: str):
         "filename": filename,
         "form_type": form_type,
         "saved_at": datetime.now().strftime("%m/%d/%Y %H:%M"),
+        "saved_date": datetime.now().strftime("%Y-%m-%d"),
         "technician": form_data.get("technician", ""),
         "date": form_data.get("date") or form_data.get("signature_date", ""),
         "customer": form_data.get("customer_name") or form_data.get("premises_name", ""),
@@ -239,6 +273,35 @@ def load_jobs_cached():
         jobs, _ = _load_jobs_index()
         st.session_state["_jobs_cache"] = jobs
     return st.session_state["_jobs_cache"]
+
+
+def clear_all_reports() -> tuple[bool, str]:
+    """
+    Delete all PDFs from jobs/ on GitHub and reset jobs.json to [].
+    Returns (ok, message).
+    """
+    jobs, jobs_sha = _load_jobs_index()
+    errors = []
+    deleted = 0
+    for job in jobs:
+        fname = job.get("filename", "")
+        if fname:
+            ok = _delete_pdf_from_github(fname)
+            if ok:
+                deleted += 1
+            else:
+                errors.append(fname)
+
+    # Reset the index to empty list
+    ok, result = _save_jobs_index([], jobs_sha)
+    if not ok:
+        return False, f"PDFs cleared ({deleted}) but failed to reset index: {result}"
+
+    st.session_state["_jobs_cache"] = []
+    msg = f"Cleared {deleted} PDF(s) and reset job log."
+    if errors:
+        msg += f" ({len(errors)} file(s) could not be deleted from GitHub.)"
+    return True, msg
 
 
 def build_jobs_excel(jobs: list) -> bytes:
@@ -284,6 +347,33 @@ def build_jobs_excel(jobs: list) -> bytes:
 
     buf = BytesIO()
     wb.save(buf)
+    return buf.getvalue()
+
+
+def build_zip_with_pdfs(jobs: list) -> bytes:
+    """
+    Build a ZIP containing all PDFs fetched from GitHub plus an Excel summary.
+    Only includes jobs from today.
+    """
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_jobs = [j for j in jobs if j.get("saved_date", "") == today_str]
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Excel summary (all jobs, not just today)
+        excel_bytes = build_jobs_excel(jobs)
+        zf.writestr(f"backflow_jobs_{today_str}.xlsx", excel_bytes)
+
+        # PDFs for today
+        for job in today_jobs:
+            fname = job.get("filename", "")
+            if not fname:
+                continue
+            pdf_bytes = _fetch_pdf_from_github(fname)
+            if pdf_bytes:
+                zf.writestr(fname, pdf_bytes)
+
+    buf.seek(0)
     return buf.getvalue()
 
 
@@ -338,7 +428,6 @@ JAX_CHECKBOXES = {
 }
 
 # ── All widget keys that must be wiped on profile load ──────────────────────
-# Display-only (disabled text_input) keys for the tester panels
 UNITED_TESTER_DISPLAY_KEYS = [
     "u_gmfg_display", "u_gsn_display", "u_cal_display",
     "u_tech_display", "u_cert_display", "u_recert_display",
@@ -348,14 +437,11 @@ JAX_TESTER_DISPLAY_KEYS = [
     "j_rb_display",  "j_rco_display", "j_rc_display",
     "j_ftn_display", "j_fco_display", "j_fc_display",
 ]
-# Editable widget keys (used by clearable_input) — kept for back-compat clearing
 UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
 JAX_TESTER_WIDGET_KEYS    = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
 
-# Canonical profile field names written into united_form
 TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
 
-# Mapping: jax_form field → profile key
 JAX_TESTER_MAP = {
     "init_tester_name": "technician", "init_company": "company", "init_cert": "cert_no",
     "repaired_by":      "technician", "repair_company": "company", "repair_cert": "cert_no",
@@ -474,17 +560,6 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
 
 
 def apply_profile_to_forms(profile: dict):
-    """
-    Push profile data into both form dicts, set the global signature,
-    then wipe EVERY display and editable widget key so Streamlit is
-    forced to re-read from the form dicts on the next render.
-
-    This is the root fix for:
-      - technician info not appearing in the form bottom panels
-      - only the signature (not tester fields) writing into generated PDFs
-    """
-    # Always clear widget keys first — even if profile is empty —
-    # so stale cached values can never survive a profile switch.
     _clear_widget_keys(
         UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
         + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
@@ -493,24 +568,19 @@ def apply_profile_to_forms(profile: dict):
     if not profile:
         return
 
-    # ── Signature ────────────────────────────────────────────
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
 
-    # ── United form ──────────────────────────────────────────
     _init_form("united_form")
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
 
-    # ── JAX form ─────────────────────────────────────────────
     _init_form("jax_form")
     jax = st.session_state["jax_form"]
-    # Map each JAX tester field to the correct profile key
     for jk, pk in JAX_TESTER_MAP.items():
         jax[jk] = profile.get(pk, "")
-    # Also write gauge / cal fields directly (used in PDF generation)
     for tk in TESTER_KEYS:
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
@@ -780,7 +850,7 @@ def render_technician_sidebar():
 
 
 # ─────────────────────────────────────────────────────────────
-# Tester panels — read directly from form dict, no stale widget cache
+# Tester panels
 # ─────────────────────────────────────────────────────────────
 
 def render_tester_panel_united():
@@ -945,9 +1015,21 @@ def render_united_tab():
                     st.success(save_msg)
                 else:
                     st.warning(save_msg)
-                st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="u_dl_pdf")
+                # Store for immediate download
+                st.session_state["_last_pdf_bytes"] = pdf_bytes
+                st.session_state["_last_pdf_name"] = fname
             except Exception as e:
                 st.error(f"PDF error: {e}")
+
+    # Always show download button if PDF was just generated this session
+    if st.session_state.get("_last_pdf_bytes") and st.session_state.get("_last_pdf_name", "").startswith("united_"):
+        st.download_button(
+            "📥 Download PDF to Device",
+            st.session_state["_last_pdf_bytes"],
+            st.session_state["_last_pdf_name"],
+            "application/pdf",
+            key="u_dl_pdf",
+        )
 
 
 def render_jax_tab():
@@ -1059,9 +1141,19 @@ def render_jax_tab():
                     st.success(save_msg)
                 else:
                     st.warning(save_msg)
-                st.download_button("📥 Download PDF", pdf_bytes, fname, "application/pdf", key="j_dl_pdf")
+                st.session_state["_last_pdf_bytes"] = pdf_bytes
+                st.session_state["_last_pdf_name"] = fname
             except Exception as e:
                 st.error(f"PDF error: {e}")
+
+    if st.session_state.get("_last_pdf_bytes") and st.session_state.get("_last_pdf_name", "").startswith("jax_"):
+        st.download_button(
+            "📥 Download PDF to Device",
+            st.session_state["_last_pdf_bytes"],
+            st.session_state["_last_pdf_name"],
+            "application/pdf",
+            key="j_dl_pdf",
+        )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1071,46 +1163,109 @@ def render_jax_tab():
 def render_jobs_tab():
     st.subheader("📁 Saved Jobs")
 
-    col_refresh, col_excel = st.columns([1, 2])
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_display = datetime.now().strftime("%B %d, %Y")
+
+    # ── Top action bar ────────────────────────────────────────
+    col_refresh, col_zip, col_excel, col_clear = st.columns([1, 2, 2, 2])
+
     with col_refresh:
         if st.button("🔄 Refresh", key="jobs_refresh"):
             st.session_state.pop("_jobs_cache", None)
             st.rerun()
 
     jobs = load_jobs_cached()
+    today_jobs = [j for j in jobs if j.get("saved_date", "") == today_str]
+
+    with col_zip:
+        if today_jobs:
+            with st.spinner("Building ZIP..."):
+                zip_bytes = build_zip_with_pdfs(jobs)
+            st.download_button(
+                f"📦 Download Today's ZIP ({len(today_jobs)} PDF{'s' if len(today_jobs) != 1 else ''} + Excel)",
+                zip_bytes,
+                f"backflow_jobs_{today_str}.zip",
+                "application/zip",
+                key="jobs_zip_dl",
+            )
+        else:
+            st.button("📦 Download Today's ZIP", disabled=True, key="jobs_zip_disabled",
+                      help="No jobs generated today yet.")
+
+    with col_excel:
+        if jobs:
+            excel_bytes = build_jobs_excel(jobs)
+            st.download_button(
+                "📊 Download Excel Summary",
+                excel_bytes,
+                f"backflow_jobs_{today_str}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="jobs_excel_dl",
+            )
+
+    with col_clear:
+        confirm_clear = st.session_state.get("_confirm_clear_reports", False)
+        if not confirm_clear:
+            if st.button("🗑️ Clear All Reports", key="clear_reports_btn", type="secondary"):
+                st.session_state["_confirm_clear_reports"] = True
+                st.rerun()
+        else:
+            st.warning("⚠️ This will delete **all PDFs and the job log** from GitHub permanently.")
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                if st.button("✅ Yes, clear all", key="confirm_clear_yes"):
+                    with st.spinner("Clearing reports..."):
+                        ok, msg = clear_all_reports()
+                    st.session_state["_confirm_clear_reports"] = False
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
+                    st.rerun()
+            with cc2:
+                if st.button("❌ Cancel", key="confirm_clear_no"):
+                    st.session_state["_confirm_clear_reports"] = False
+                    st.rerun()
+
+    st.divider()
 
     if not jobs:
         st.info("No jobs saved yet. Generate a PDF from the United Fire or Jacksonville tab to autosave a job here.")
         return
 
-    with col_excel:
-        excel_bytes = build_jobs_excel(jobs)
-        today = datetime.now().strftime("%Y%m%d")
-        st.download_button(
-            "📊 Download Excel Summary",
-            excel_bytes,
-            f"backflow_jobs_{today}.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="jobs_excel_dl",
-        )
+    # ── Today's jobs ──────────────────────────────────────────
+    if today_jobs:
+        st.markdown(f"#### 📅 Today — {today_display} ({len(today_jobs)} job{'s' if len(today_jobs) != 1 else ''})")
+        for job in reversed(today_jobs):
+            result = job.get("assembly_result", "")
+            result_icon = "✅" if result == "PASSED" else ("❌" if result == "FAILED" else "❔")
+            with st.expander(f"{result_icon} {job.get('customer', 'Unknown')} — {job.get('date', '')} [{job.get('form_type','').upper()}]", expanded=False):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Result", result or "—")
+                c2.metric("Technician", job.get("technician", "—"))
+                c3.metric("Saved", job.get("saved_at", "—"))
+                st.write(f"**Address:** {job.get('address', '—')}")
+                st.write(f"**Serial #:** {job.get('serial_number', '—')} | **Assembly:** {job.get('assembly_type', '—')}")
+                st.write(f"**File:** `{job.get('filename', '—')}`")
+                pdf_url = job.get("pdf_url", "")
+                if pdf_url:
+                    st.markdown(f"[🔗 View PDF on GitHub]({pdf_url})")
+    else:
+        st.info(f"No jobs generated today ({today_display}). Previous jobs are in the history below.")
 
-    st.caption(f"{len(jobs)} job(s) on record")
-    st.divider()
-
-    for job in reversed(jobs):
-        result = job.get("assembly_result", "")
-        result_icon = "✅" if result == "PASSED" else ("❌" if result == "FAILED" else "❔")
-        with st.expander(f"{result_icon} {job.get('customer', 'Unknown')} — {job.get('date', '')} [{job.get('form_type','').upper()}]", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Result", result or "—")
-            c2.metric("Technician", job.get("technician", "—"))
-            c3.metric("Saved", job.get("saved_at", "—"))
-            st.write(f"**Address:** {job.get('address', '—')}")
-            st.write(f"**Serial #:** {job.get('serial_number', '—')} | **Assembly:** {job.get('assembly_type', '—')}")
-            st.write(f"**File:** `{job.get('filename', '—')}`")
-            pdf_url = job.get("pdf_url", "")
-            if pdf_url:
-                st.markdown(f"[🔗 View PDF on GitHub]({pdf_url})")
+    # ── Older jobs (collapsed) ────────────────────────────────
+    older_jobs = [j for j in jobs if j.get("saved_date", "") != today_str]
+    if older_jobs:
+        with st.expander(f"📂 Previous Jobs ({len(older_jobs)} record{'s' if len(older_jobs) != 1 else ''})", expanded=False):
+            for job in reversed(older_jobs):
+                result = job.get("assembly_result", "")
+                result_icon = "✅" if result == "PASSED" else ("❌" if result == "FAILED" else "❔")
+                st.markdown(
+                    f"{result_icon} **{job.get('customer', 'Unknown')}** — "
+                    f"{job.get('date', '')} [{job.get('form_type','').upper()}] — "
+                    f"_{job.get('saved_at', '')}_"
+                )
+            st.caption("Use 'Download Excel Summary' for a full export of all records.")
 
 
 # ─────────────────────────────────────────────────────────────
