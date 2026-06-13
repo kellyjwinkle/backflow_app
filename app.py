@@ -18,6 +18,46 @@ PAGE_W, PAGE_H = 612, 792
 GITHUB_REPO = "kellyjwinkle/backflow_app"
 GITHUB_API_BASE = "https://api.github.com"
 
+# ── Fields that persist between jobs (site/customer info) ────
+UNITED_STICKY_FIELDS = [
+    "customer_name", "street_address", "location", "branch", "ahj",
+]
+JAX_STICKY_FIELDS = [
+    "premises_name", "owner_name", "service_address", "mailing_address",
+    "physical_location", "contact_phone", "jea_account", "meter_number",
+]
+
+# ── Fields reset after each job (test results + assembly) ────
+UNITED_RESET_FIELDS = [
+    "serial_number", "manufacturer", "model", "size",
+    "assembly_type", "system_service", "bypass",
+    "cv1_result", "cv1_dp", "cv2_result", "cv2_dp",
+    "rv_result", "rv_psi", "rv_out_result", "rv_in_result",
+    "pvb_ai_result", "pvb_ai_psi", "pvb_cv_result", "pvb_cv_psi",
+    "assembly_result", "repair_desc",
+]
+JAX_RESET_FIELDS = [
+    "device_type", "manufacturer", "size", "model_number", "serial_number", "install_date",
+    "comm_test_purpose", "comm_service_type", "comm_reclaim", "comm_fire_bypass",
+    "res_test_purpose", "res_service_type", "res_reclaim",
+    "init_cv1_result", "init_cv1_psi", "init_cv2_result", "init_cv2_psi",
+    "init_rv_result", "init_rv_psi", "init_pvb_result", "init_pvb_psi",
+    "final_cv1_result", "final_cv1_psi", "final_cv2_result", "final_cv2_psi",
+    "final_rv_result", "final_rv_psi", "final_pvb_result",
+    "assembly_result", "repairs",
+]
+
+# ── Widget keys for reset fields (must be wiped so widgets re-render) ──
+UNITED_RESET_WIDGET_KEYS = [
+    "u_sn", "u_mfg", "u_mdl", "u_sz",
+    "u_cv1dp", "u_cv2dp", "u_rvpsi", "u_aipsi", "u_cvpsi", "u_rep",
+]
+JAX_RESET_WIDGET_KEYS = [
+    "j_dt", "j_mfg", "j_sz", "j_mn", "j_sn", "j_id",
+    "j_icv1p", "j_icv2p", "j_irvp", "j_ipvbp",
+    "j_fcv1p", "j_fcv2p", "j_frvp", "j_rep",
+]
+
 
 def _get_pdf_page_size(path):
     try:
@@ -301,6 +341,35 @@ def clear_all_reports() -> tuple[bool, str]:
     if errors:
         msg += f" ({len(errors)} file(s) could not be deleted from GitHub.)"
     return True, msg
+
+
+def reset_form_for_new_job(form_type: str):
+    """
+    Clear only test-result and assembly fields after a job is saved.
+    Customer/site fields (sticky) are intentionally preserved.
+    """
+    if form_type == "united":
+        form = st.session_state.get("united_form", {})
+        for f in UNITED_RESET_FIELDS:
+            form.pop(f, None)
+        _clear_widget_keys(UNITED_RESET_WIDGET_KEYS)
+        # selectbox keys need popping so they re-render at blank
+        for k in ["u_assembly_type", "u_system_service", "u_bypass",
+                  "u_cv1_result", "u_cv2_result", "u_rv_result",
+                  "u_rv_out_result", "u_rv_in_result",
+                  "u_pvb_ai_result", "u_pvb_cv_result", "u_assembly_result"]:
+            st.session_state.pop(k, None)
+    else:
+        form = st.session_state.get("jax_form", {})
+        for f in JAX_RESET_FIELDS:
+            form.pop(f, None)
+        _clear_widget_keys(JAX_RESET_WIDGET_KEYS)
+        for k in ["j_comm_test_purpose", "j_comm_service_type", "j_comm_reclaim",
+                  "j_res_test_purpose", "j_res_service_type", "j_res_reclaim",
+                  "j_init_cv1_result", "j_init_cv2_result", "j_init_rv_result",
+                  "j_init_pvb_result", "j_final_cv1_result", "j_final_cv2_result",
+                  "j_final_rv_result", "j_final_pvb_result", "j_assembly_result"]:
+            st.session_state.pop(k, None)
 
 
 def build_jobs_excel(jobs: list) -> bytes:
@@ -917,6 +986,22 @@ def render_united_tab():
     _init_form("united_form")
     form = st.session_state["united_form"]
     st.subheader("📋 United Fire — Backflow Test Report")
+
+    # ── Sticky site info banner ───────────────────────────────
+    sticky_customer = form.get("customer_name", "")
+    sticky_address  = form.get("street_address", "")
+    if sticky_customer or sticky_address:
+        col_info, col_clear = st.columns([0.85, 0.15])
+        with col_info:
+            st.info(f"📍 **Site carried over:** {sticky_customer or '—'}  ·  {sticky_address or '—'}")
+        with col_clear:
+            if st.button("✖ New Site", key="u_clear_site", help="Clear customer/address fields for a new location"):
+                for f in UNITED_STICKY_FIELDS:
+                    form.pop(f, None)
+                for k in ["u_cust", "u_addr", "u_loc", "u_branch", "u_ahj"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
     synced_date_input("Inspection Date", "united_form", "date", "u_date_picker", ["date", "test_date"])
     clearable_input("Branch", "united_form", "branch", "u_branch")
     clearable_input("AHJ", "united_form", "ahj", "u_ahj")
@@ -1005,6 +1090,8 @@ def render_united_tab():
                 save_ok, save_msg, fname = autosave_job(form, pdf_bytes, "united")
                 if save_ok:
                     st.success(save_msg)
+                    reset_form_for_new_job("united")
+                    st.rerun()
                 else:
                     st.warning(save_msg)
                 st.session_state["_last_pdf_bytes"] = pdf_bytes
@@ -1026,6 +1113,22 @@ def render_jax_tab():
     _init_form("jax_form")
     form = st.session_state["jax_form"]
     st.subheader("📋 Jacksonville (JEA) — Backflow Test Report")
+
+    # ── Sticky site info banner ───────────────────────────────
+    sticky_premises = form.get("premises_name", "")
+    sticky_address  = form.get("service_address", "")
+    if sticky_premises or sticky_address:
+        col_info, col_clear = st.columns([0.85, 0.15])
+        with col_info:
+            st.info(f"📍 **Site carried over:** {sticky_premises or '—'}  ·  {sticky_address or '—'}")
+        with col_clear:
+            if st.button("✖ New Site", key="j_clear_site", help="Clear premises/address fields for a new location"):
+                for f in JAX_STICKY_FIELDS:
+                    form.pop(f, None)
+                for k in ["j_prem", "j_own", "j_sa", "j_ma", "j_pl", "j_ph", "j_acct", "j_meter"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
     synced_date_input("Inspection Date", "jax_form", "signature_date", "j_sig_date_picker", ["signature_date", "init_test_date", "final_test_date", "repair_date"])
     col1, col2 = st.columns(2)
     with col1:
@@ -1129,6 +1232,8 @@ def render_jax_tab():
                 save_ok, save_msg, fname = autosave_job(form, pdf_bytes, "jax")
                 if save_ok:
                     st.success(save_msg)
+                    reset_form_for_new_job("jax")
+                    st.rerun()
                 else:
                     st.warning(save_msg)
                 st.session_state["_last_pdf_bytes"] = pdf_bytes
