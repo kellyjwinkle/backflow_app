@@ -255,7 +255,7 @@ def _delete_pdf_from_github(filename: str) -> bool:
         return False
 
 
-def _fetch_pdf_from_github(filename: str) -> bytes | None:
+def _fetch_pdf_from_github(filename: str):
     """Fetch PDF bytes from jobs/<filename> on GitHub."""
     path = f"{JOBS_FOLDER}/{filename}"
     url = f"{GITHUB_API_BASE}/repos/{GITHUB_REPO}/contents/{path}"
@@ -317,7 +317,7 @@ def load_jobs_cached():
     return st.session_state["_jobs_cache"]
 
 
-def clear_all_reports() -> tuple[bool, str]:
+def clear_all_reports() -> tuple:
     """
     Delete all PDFs from jobs/ on GitHub and reset jobs.json to [].
     Returns (ok, message).
@@ -356,7 +356,6 @@ def reset_form_for_new_job(form_type: str):
         for f in UNITED_RESET_FIELDS:
             form.pop(f, None)
         _clear_widget_keys(UNITED_RESET_WIDGET_KEYS)
-        # selectbox keys need popping so they re-render at blank
         for k in ["u_assembly_type", "u_system_service", "u_bypass",
                   "u_cv1_result", "u_cv2_result", "u_rv_result",
                   "u_rv_out_result", "u_rv_in_result",
@@ -938,18 +937,18 @@ def render_tester_panel_united():
             st.rerun()
     col1, col2 = st.columns(2)
     with col1:
-        v = st.text_input("Gauge Mfg",      value=form.get("gauge_mfg",    ""), key="u_gmfg_display")
+        v = st.text_input("Gauge Mfg",       value=form.get("gauge_mfg",    ""), key="u_gmfg_display")
         form["gauge_mfg"] = v
-        v = st.text_input("Gauge Serial",   value=form.get("gauge_serial", ""), key="u_gsn_display")
+        v = st.text_input("Gauge Serial",    value=form.get("gauge_serial", ""), key="u_gsn_display")
         form["gauge_serial"] = v
-        v = st.text_input("Date Calibrated", value=form.get("date_cal",    ""), key="u_cal_display")
+        v = st.text_input("Date Calibrated", value=form.get("date_cal",     ""), key="u_cal_display")
         form["date_cal"] = v
     with col2:
-        v = st.text_input("Technician",     value=form.get("technician",   ""), key="u_tech_display")
+        v = st.text_input("Technician",      value=form.get("technician",   ""), key="u_tech_display")
         form["technician"] = v
-        v = st.text_input("Cert No.",       value=form.get("cert_no",      ""), key="u_cert_display")
+        v = st.text_input("Cert No.",        value=form.get("cert_no",      ""), key="u_cert_display")
         form["cert_no"] = v
-        v = st.text_input("Re-Cert Date",   value=form.get("recert",       ""), key="u_recert_display")
+        v = st.text_input("Re-Cert Date",    value=form.get("recert",       ""), key="u_recert_display")
         form["recert"] = v
     sig_b64 = st.session_state.get("signature_b64") or form.get("signature_b64")
     if sig_b64:
@@ -977,4 +976,497 @@ def render_tester_panel_jax():
                 form[jk] = profile.get(pk, "")
             _clear_widget_keys(JAX_TESTER_DISPLAY_KEYS)
             st.rerun()
-    col
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        v = st.text_input("Init Tester Name", value=form.get("init_tester_name", ""), key="j_itn_display")
+        form["init_tester_name"] = v
+        v = st.text_input("Repaired By",      value=form.get("repaired_by",      ""), key="j_rb_display")
+        form["repaired_by"] = v
+        v = st.text_input("Final Tester",     value=form.get("final_tester_name",""), key="j_ftn_display")
+        form["final_tester_name"] = v
+    with col2:
+        v = st.text_input("Init Company",     value=form.get("init_company",     ""), key="j_ico_display")
+        form["init_company"] = v
+        v = st.text_input("Repair Company",   value=form.get("repair_company",   ""), key="j_rco_display")
+        form["repair_company"] = v
+        v = st.text_input("Final Company",    value=form.get("final_company",    ""), key="j_fco_display")
+        form["final_company"] = v
+    with col3:
+        v = st.text_input("Init Cert",        value=form.get("init_cert",        ""), key="j_ic_display")
+        form["init_cert"] = v
+        v = st.text_input("Repair Cert",      value=form.get("repair_cert",      ""), key="j_rc_display")
+        form["repair_cert"] = v
+        v = st.text_input("Final Cert",       value=form.get("final_cert",       ""), key="j_fc_display")
+        form["final_cert"] = v
+    sig_b64 = st.session_state.get("signature_b64") or form.get("signature_b64")
+    if sig_b64:
+        st.image(base64.b64decode(sig_b64), caption="Signature on file", width=200)
+    else:
+        st.caption("⚠️ No signature loaded. Upload or draw one in the sidebar and save it to the profile.")
+
+
+# ─────────────────────────────────────────────────────────────
+# United Fire form
+# ─────────────────────────────────────────────────────────────
+
+def render_united_form():
+    _init_form("united_form")
+    form = st.session_state["united_form"]
+
+    st.subheader("📋 United Fire Protection — Backflow Test Report")
+
+    # ── Site / Customer (sticky) ──────────────────────────────
+    st.markdown("**Site / Customer Info**")
+    col1, col2 = st.columns(2)
+    with col1:
+        clearable_input("Customer Name", "united_form", "customer_name", "u_cust")
+        clearable_input("Street Address", "united_form", "street_address", "u_addr")
+        clearable_input("Branch", "united_form", "branch", "u_branch")
+    with col2:
+        clearable_input("AHJ", "united_form", "ahj", "u_ahj")
+        clearable_input("Manufacturer", "united_form", "manufacturer", "u_mfg")
+        clearable_input("Model", "united_form", "model", "u_model")
+        clearable_input("Size", "united_form", "size", "u_size")
+
+    st.divider()
+
+    # ── Per-job fields (reset after save) ────────────────────
+    st.markdown("**Assembly / Job Info**")
+    col1, col2 = st.columns(2)
+    with col1:
+        synced_date_input("Test Date", "united_form", "date", "u_date", ["test_date"])
+        clearable_input("Serial Number", "united_form", "serial_number", "u_sn")
+        clearable_input("Location", "united_form", "location", "u_loc")
+    with col2:
+        atype = st.selectbox("Assembly Type", ["", "RP", "DC", "PVB", "SVB"],
+                             index=["", "RP", "DC", "PVB", "SVB"].index(form.get("assembly_type", "")) if form.get("assembly_type", "") in ["", "RP", "DC", "PVB", "SVB"] else 0,
+                             key="u_assembly_type")
+        form["assembly_type"] = atype
+        svc = st.selectbox("System Service", ["", "Fire", "Domestic", "Irrigation", "Attraction"],
+                           index=["", "Fire", "Domestic", "Irrigation", "Attraction"].index(form.get("system_service", "")) if form.get("system_service", "") in ["", "Fire", "Domestic", "Irrigation", "Attraction"] else 0,
+                           key="u_system_service")
+        form["system_service"] = svc
+        bypass = st.selectbox("Bypass", ["", "Yes", "No"],
+                              index=["", "Yes", "No"].index(form.get("bypass", "")) if form.get("bypass", "") in ["", "Yes", "No"] else 0,
+                              key="u_bypass")
+        form["bypass"] = bypass
+
+    st.divider()
+
+    # ── Test results (conditional on assembly type) ──────────
+    st.markdown("**Test Results**")
+    atype_val = form.get("assembly_type", "")
+
+    if atype_val in ("", "RP", "DC"):
+        col1, col2 = st.columns(2)
+        with col1:
+            cv1 = st.selectbox("CV1 Result", ["", "Closed Tight", "Leaked"],
+                               index=["", "Closed Tight", "Leaked"].index(form.get("cv1_result", "")) if form.get("cv1_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                               key="u_cv1_result")
+            form["cv1_result"] = cv1
+            cv1dp = st.text_input("CV1 Differential Pressure", value=form.get("cv1_dp", ""), key="u_cv1dp")
+            form["cv1_dp"] = cv1dp
+        with col2:
+            cv2 = st.selectbox("CV2 Result", ["", "Closed Tight", "Leaked"],
+                               index=["", "Closed Tight", "Leaked"].index(form.get("cv2_result", "")) if form.get("cv2_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                               key="u_cv2_result")
+            form["cv2_result"] = cv2
+            cv2dp = st.text_input("CV2 Differential Pressure", value=form.get("cv2_dp", ""), key="u_cv2dp")
+            form["cv2_dp"] = cv2dp
+
+    if atype_val in ("", "RP"):
+        st.markdown("*Relief Valve*")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            rv = st.selectbox("RV Result", ["", "Opened", "Did Not Open"],
+                              index=["", "Opened", "Did Not Open"].index(form.get("rv_result", "")) if form.get("rv_result", "") in ["", "Opened", "Did Not Open"] else 0,
+                              key="u_rv_result")
+            form["rv_result"] = rv
+        with col2:
+            rvpsi = st.text_input("RV Opened At (psi)", value=form.get("rv_psi", ""), key="u_rvpsi")
+            form["rv_psi"] = rvpsi
+        with col3:
+            rvo = st.selectbox("RV Outlet", ["", "Closed Tight", "Leaked"],
+                               index=["", "Closed Tight", "Leaked"].index(form.get("rv_out_result", "")) if form.get("rv_out_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                               key="u_rv_out_result")
+            form["rv_out_result"] = rvo
+            rvi = st.selectbox("RV Inlet", ["", "Closed Tight", "Leaked"],
+                               index=["", "Closed Tight", "Leaked"].index(form.get("rv_in_result", "")) if form.get("rv_in_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                               key="u_rv_in_result")
+            form["rv_in_result"] = rvi
+
+    if atype_val in ("", "PVB", "SVB"):
+        st.markdown("*Pressure Vacuum Breaker*")
+        col1, col2 = st.columns(2)
+        with col1:
+            pai = st.selectbox("Air Inlet Result", ["", "Opened", "Did Not Open"],
+                               index=["", "Opened", "Did Not Open"].index(form.get("pvb_ai_result", "")) if form.get("pvb_ai_result", "") in ["", "Opened", "Did Not Open"] else 0,
+                               key="u_pvb_ai_result")
+            form["pvb_ai_result"] = pai
+            aipsi = st.text_input("Air Inlet (psi)", value=form.get("pvb_ai_psi", ""), key="u_aipsi")
+            form["pvb_ai_psi"] = aipsi
+        with col2:
+            pcv = st.selectbox("CV Result", ["", "Held", "Leaked"],
+                               index=["", "Held", "Leaked"].index(form.get("pvb_cv_result", "")) if form.get("pvb_cv_result", "") in ["", "Held", "Leaked"] else 0,
+                               key="u_pvb_cv_result")
+            form["pvb_cv_result"] = pcv
+            cvpsi = st.text_input("CV (psi)", value=form.get("pvb_cv_psi", ""), key="u_cvpsi")
+            form["pvb_cv_psi"] = cvpsi
+
+    st.divider()
+    col1, col2 = st.columns(2)
+    with col1:
+        ar = st.selectbox("Assembly Result", ["", "PASSED", "FAILED"],
+                          index=["", "PASSED", "FAILED"].index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ["", "PASSED", "FAILED"] else 0,
+                          key="u_assembly_result")
+        form["assembly_result"] = ar
+    with col2:
+        rep = st.text_input("Repair Description", value=form.get("repair_desc", ""), key="u_rep")
+        form["repair_desc"] = rep
+
+    render_tester_panel_united()
+
+    st.divider()
+    col_gen, col_save = st.columns(2)
+    with col_gen:
+        if st.button("🖨️ Generate PDF", key="u_gen_pdf"):
+            try:
+                pdf_bytes = generate_united_pdf(form)
+                st.session_state["u_pdf_bytes"] = pdf_bytes
+                st.success("PDF generated!")
+            except Exception as e:
+                st.error(f"PDF generation failed: {e}")
+    with col_save:
+        if st.button("💾 Save Job", key="u_save_job"):
+            try:
+                pdf_bytes = generate_united_pdf(form)
+                ok, msg, fname = autosave_job(form, pdf_bytes, "united")
+                if ok:
+                    st.success(msg)
+                    reset_form_for_new_job("united")
+                    st.session_state.pop("u_pdf_bytes", None)
+                    st.rerun()
+                else:
+                    st.error(msg)
+            except Exception as e:
+                st.error(f"Save failed: {e}")
+
+    if "u_pdf_bytes" in st.session_state:
+        st.download_button(
+            "⬇️ Download PDF",
+            data=st.session_state["u_pdf_bytes"],
+            file_name=f"backflow_{form.get('customer_name','report')}_{date.today().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            key="u_dl_pdf",
+        )
+
+
+# ─────────────────────────────────────────────────────────────
+# Jacksonville form
+# ─────────────────────────────────────────────────────────────
+
+def render_jax_form():
+    _init_form("jax_form")
+    form = st.session_state["jax_form"]
+
+    st.subheader("📋 Jacksonville — Backflow Test Report")
+
+    # ── Site / Customer (sticky) ──────────────────────────────
+    st.markdown("**Premises / Owner Info**")
+    col1, col2 = st.columns(2)
+    with col1:
+        clearable_input("Premises Name", "jax_form", "premises_name", "j_pn")
+        clearable_input("Service Address", "jax_form", "service_address", "j_sa")
+        clearable_input("Physical Location", "jax_form", "physical_location", "j_pl")
+        clearable_input("JEA Account #", "jax_form", "jea_account", "j_jea")
+    with col2:
+        clearable_input("Owner Name", "jax_form", "owner_name", "j_on")
+        clearable_input("Mailing Address", "jax_form", "mailing_address", "j_ma")
+        clearable_input("Contact Phone", "jax_form", "contact_phone", "j_cp")
+        clearable_input("Meter Number", "jax_form", "meter_number", "j_mn")
+
+    st.divider()
+
+    # ── Commercial section ────────────────────────────────────
+    st.markdown("**Commercial**")
+    col1, col2 = st.columns(2)
+    with col1:
+        comm_tp = st.selectbox("Test Purpose", ["", "Annual", "Repair", "Replacement", "New Install"],
+                               index=["", "Annual", "Repair", "Replacement", "New Install"].index(form.get("comm_test_purpose", "")) if form.get("comm_test_purpose", "") in ["", "Annual", "Repair", "Replacement", "New Install"] else 0,
+                               key="j_comm_test_purpose")
+        form["comm_test_purpose"] = comm_tp
+        comm_st = st.selectbox("Service Type", ["", "Fire", "Irrigation", "Process", "Potable"],
+                               index=["", "Fire", "Irrigation", "Process", "Potable"].index(form.get("comm_service_type", "")) if form.get("comm_service_type", "") in ["", "Fire", "Irrigation", "Process", "Potable"] else 0,
+                               key="j_comm_service_type")
+        form["comm_service_type"] = comm_st
+    with col2:
+        comm_rc = st.selectbox("Reclaim", ["", "Yes", "No"],
+                               index=["", "Yes", "No"].index(form.get("comm_reclaim", "")) if form.get("comm_reclaim", "") in ["", "Yes", "No"] else 0,
+                               key="j_comm_reclaim")
+        form["comm_reclaim"] = comm_rc
+        comm_fp = st.checkbox("Fire Service Bypass", value=bool(form.get("comm_fire_bypass", False)), key="j_comm_fire_bypass")
+        form["comm_fire_bypass"] = comm_fp
+
+    st.divider()
+
+    # ── Residential section ───────────────────────────────────
+    st.markdown("**Residential**")
+    col1, col2 = st.columns(2)
+    with col1:
+        res_tp = st.selectbox("Test Purpose (Res)", ["", "Annual", "Repair", "Replacement", "New Install"],
+                              index=["", "Annual", "Repair", "Replacement", "New Install"].index(form.get("res_test_purpose", "")) if form.get("res_test_purpose", "") in ["", "Annual", "Repair", "Replacement", "New Install"] else 0,
+                              key="j_res_test_purpose")
+        form["res_test_purpose"] = res_tp
+        res_st = st.selectbox("Service Type (Res)", ["", "Potable", "Irrigation"],
+                              index=["", "Potable", "Irrigation"].index(form.get("res_service_type", "")) if form.get("res_service_type", "") in ["", "Potable", "Irrigation"] else 0,
+                              key="j_res_service_type")
+        form["res_service_type"] = res_st
+    with col2:
+        res_rc = st.selectbox("Reclaim (Res)", ["", "Yes", "No"],
+                              index=["", "Yes", "No"].index(form.get("res_reclaim", "")) if form.get("res_reclaim", "") in ["", "Yes", "No"] else 0,
+                              key="j_res_reclaim")
+        form["res_reclaim"] = res_rc
+
+    st.divider()
+
+    # ── Device info (resets per job) ──────────────────────────
+    st.markdown("**Device Info**")
+    col1, col2 = st.columns(2)
+    with col1:
+        clearable_input("Device Type", "jax_form", "device_type", "j_dt")
+        clearable_input("Serial Number", "jax_form", "serial_number", "j_sn")
+        clearable_input("Install Date", "jax_form", "install_date", "j_id")
+    with col2:
+        clearable_input("Manufacturer", "jax_form", "manufacturer", "j_jmfg")
+        clearable_input("Model Number", "jax_form", "model_number", "j_jmod")
+        clearable_input("Size", "jax_form", "size", "j_jsz")
+
+    st.divider()
+
+    # ── Initial test results ──────────────────────────────────
+    st.markdown("**Initial Test Results**")
+    col1, col2 = st.columns(2)
+    with col1:
+        icv1 = st.selectbox("Init CV1", ["", "Closed Tight", "Leaked"],
+                            index=["", "Closed Tight", "Leaked"].index(form.get("init_cv1_result", "")) if form.get("init_cv1_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                            key="j_init_cv1_result")
+        form["init_cv1_result"] = icv1
+        icv1p = st.text_input("Init CV1 (psi)", value=form.get("init_cv1_psi", ""), key="j_icv1p")
+        form["init_cv1_psi"] = icv1p
+        icv2 = st.selectbox("Init CV2", ["", "Closed Tight", "Leaked"],
+                            index=["", "Closed Tight", "Leaked"].index(form.get("init_cv2_result", "")) if form.get("init_cv2_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                            key="j_init_cv2_result")
+        form["init_cv2_result"] = icv2
+        icv2p = st.text_input("Init CV2 (psi)", value=form.get("init_cv2_psi", ""), key="j_icv2p")
+        form["init_cv2_psi"] = icv2p
+    with col2:
+        irv = st.selectbox("Init RV", ["", "Opened", "Did Not Open"],
+                           index=["", "Opened", "Did Not Open"].index(form.get("init_rv_result", "")) if form.get("init_rv_result", "") in ["", "Opened", "Did Not Open"] else 0,
+                           key="j_init_rv_result")
+        form["init_rv_result"] = irv
+        irvp = st.text_input("Init RV (psi)", value=form.get("init_rv_psi", ""), key="j_irvp")
+        form["init_rv_psi"] = irvp
+        ipvb = st.selectbox("Init PVB", ["", "Air Inlet Opened", "Air Inlet Did Not"],
+                            index=["", "Air Inlet Opened", "Air Inlet Did Not"].index(form.get("init_pvb_result", "")) if form.get("init_pvb_result", "") in ["", "Air Inlet Opened", "Air Inlet Did Not"] else 0,
+                            key="j_init_pvb_result")
+        form["init_pvb_result"] = ipvb
+        ipvbp = st.text_input("Init PVB (psi)", value=form.get("init_pvb_psi", ""), key="j_ipvbp")
+        form["init_pvb_psi"] = ipvbp
+
+    st.divider()
+
+    # ── Final test results ────────────────────────────────────
+    st.markdown("**Final Test Results**")
+    col1, col2 = st.columns(2)
+    with col1:
+        fcv1 = st.selectbox("Final CV1", ["", "Closed Tight", "Leaked"],
+                            index=["", "Closed Tight", "Leaked"].index(form.get("final_cv1_result", "")) if form.get("final_cv1_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                            key="j_final_cv1_result")
+        form["final_cv1_result"] = fcv1
+        fcv1p = st.text_input("Final CV1 (psi)", value=form.get("final_cv1_psi", ""), key="j_fcv1p")
+        form["final_cv1_psi"] = fcv1p
+        fcv2 = st.selectbox("Final CV2", ["", "Closed Tight", "Leaked"],
+                            index=["", "Closed Tight", "Leaked"].index(form.get("final_cv2_result", "")) if form.get("final_cv2_result", "") in ["", "Closed Tight", "Leaked"] else 0,
+                            key="j_final_cv2_result")
+        form["final_cv2_result"] = fcv2
+        fcv2p = st.text_input("Final CV2 (psi)", value=form.get("final_cv2_psi", ""), key="j_fcv2p")
+        form["final_cv2_psi"] = fcv2p
+    with col2:
+        frv = st.selectbox("Final RV", ["", "Opened", "Did Not Open"],
+                           index=["", "Opened", "Did Not Open"].index(form.get("final_rv_result", "")) if form.get("final_rv_result", "") in ["", "Opened", "Did Not Open"] else 0,
+                           key="j_final_rv_result")
+        form["final_rv_result"] = frv
+        frvp = st.text_input("Final RV (psi)", value=form.get("final_rv_psi", ""), key="j_frvp")
+        form["final_rv_psi"] = frvp
+        fpvb = st.selectbox("Final PVB", ["", "Satisfactory"],
+                            index=["", "Satisfactory"].index(form.get("final_pvb_result", "")) if form.get("final_pvb_result", "") in ["", "Satisfactory"] else 0,
+                            key="j_final_pvb_result")
+        form["final_pvb_result"] = fpvb
+
+    st.divider()
+    col1, col2 = st.columns(2)
+    with col1:
+        ar = st.selectbox("Assembly Result", ["", "PASSED", "FAILED"],
+                          index=["", "PASSED", "FAILED"].index(form.get("assembly_result", "")) if form.get("assembly_result", "") in ["", "PASSED", "FAILED"] else 0,
+                          key="j_assembly_result")
+        form["assembly_result"] = ar
+    with col2:
+        rep = st.text_input("Repairs Made", value=form.get("repairs", ""), key="j_rep")
+        form["repairs"] = rep
+
+    synced_date_input("Signature Date", "jax_form", "signature_date", "j_sigdate",
+                      ["init_test_date", "final_test_date", "repair_date"])
+
+    render_tester_panel_jax()
+
+    st.divider()
+    col_gen, col_save = st.columns(2)
+    with col_gen:
+        if st.button("🖨️ Generate PDF", key="j_gen_pdf"):
+            try:
+                pdf_bytes = generate_jax_pdf(form)
+                st.session_state["j_pdf_bytes"] = pdf_bytes
+                st.success("PDF generated!")
+            except Exception as e:
+                st.error(f"PDF generation failed: {e}")
+    with col_save:
+        if st.button("💾 Save Job", key="j_save_job"):
+            try:
+                pdf_bytes = generate_jax_pdf(form)
+                ok, msg, fname = autosave_job(form, pdf_bytes, "jax")
+                if ok:
+                    st.success(msg)
+                    reset_form_for_new_job("jax")
+                    st.session_state.pop("j_pdf_bytes", None)
+                    st.rerun()
+                else:
+                    st.error(msg)
+            except Exception as e:
+                st.error(f"Save failed: {e}")
+
+    if "j_pdf_bytes" in st.session_state:
+        st.download_button(
+            "⬇️ Download PDF",
+            data=st.session_state["j_pdf_bytes"],
+            file_name=f"jax_backflow_{form.get('premises_name','report')}_{date.today().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            key="j_dl_pdf",
+        )
+
+
+# ─────────────────────────────────────────────────────────────
+# Jobs tab
+# ─────────────────────────────────────────────────────────────
+
+def render_jobs_tab():
+    st.subheader("📁 Saved Jobs")
+
+    if st.button("🔄 Refresh Jobs", key="refresh_jobs"):
+        st.session_state.pop("_jobs_cache", None)
+        st.rerun()
+
+    all_jobs = load_jobs_cached()
+
+    if not all_jobs:
+        st.info("No jobs saved yet.")
+        return
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_jobs = [j for j in all_jobs if j.get("saved_date") == today_str]
+    older_jobs = [j for j in all_jobs if j.get("saved_date") != today_str]
+
+    # ── Today's jobs with checkboxes ─────────────────────────
+    if today_jobs:
+        st.markdown(f"**Today — {datetime.now().strftime('%m/%d/%Y')}**")
+        selected_filenames = []
+        for job in today_jobs:
+            fname = job.get("filename", "")
+            label = f"{job.get('saved_at','')} | {job.get('form_type','').upper()} | {job.get('customer','')} | {job.get('assembly_result','')}"
+            checked = st.checkbox(label, key=f"chk_{fname}")
+            if checked:
+                selected_filenames.append(fname)
+            with st.expander(f"Details — {fname}", expanded=False):
+                st.json({k: v for k, v in job.items() if k != "pdf_url"})
+                if job.get("pdf_url"):
+                    st.markdown(f"[View on GitHub]({job['pdf_url']})")
+
+        if selected_filenames:
+            selected_jobs = [j for j in today_jobs if j.get("filename") in selected_filenames]
+            if st.button(f"⬇️ Download ZIP ({len(selected_jobs)} selected)", key="dl_zip"):
+                with st.spinner("Building ZIP…"):
+                    zip_bytes = build_zip_for_selected(selected_jobs, all_jobs)
+                st.download_button(
+                    "⬇️ Save ZIP",
+                    data=zip_bytes,
+                    file_name=f"backflow_jobs_{today_str}.zip",
+                    mime="application/zip",
+                    key="save_zip",
+                )
+
+    # ── Older jobs ───────────────────────────────────────────
+    if older_jobs:
+        with st.expander(f"📂 Previous Jobs ({len(older_jobs)})", expanded=False):
+            for job in reversed(older_jobs):
+                fname = job.get("filename", "")
+                label = f"{job.get('saved_at','')} | {job.get('form_type','').upper()} | {job.get('customer','')} | {job.get('assembly_result','')}"
+                st.markdown(f"**{label}**")
+                if job.get("pdf_url"):
+                    st.markdown(f"[View PDF on GitHub]({job['pdf_url']})")
+                st.divider()
+
+    # ── Excel export ─────────────────────────────────────────
+    st.divider()
+    if st.button("📊 Export All to Excel", key="export_excel"):
+        excel_bytes = build_jobs_excel(all_jobs)
+        st.download_button(
+            "⬇️ Download Excel",
+            data=excel_bytes,
+            file_name=f"backflow_jobs_{today_str}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_excel",
+        )
+
+    # ── Clear all ────────────────────────────────────────────
+    st.divider()
+    confirm_clear = "_confirm_clear_all"
+    if not st.session_state.get(confirm_clear, False):
+        if st.button("🗑️ Clear All Reports", key="clear_all_btn"):
+            st.session_state[confirm_clear] = True
+            st.rerun()
+    else:
+        st.warning("⚠️ This will delete ALL saved PDFs and reset the job log. This cannot be undone.")
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("✅ Yes, clear everything", key="confirm_clear_yes"):
+                with st.spinner("Deleting…"):
+                    ok, msg = clear_all_reports()
+                st.session_state[confirm_clear] = False
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+                st.rerun()
+        with col_no:
+            if st.button("❌ Cancel", key="confirm_clear_no"):
+                st.session_state[confirm_clear] = False
+                st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────
+
+def main():
+    st.set_page_config(page_title="Backflow Test Reports", page_icon="💧", layout="wide")
+    render_technician_sidebar()
+    tab_united, tab_jax, tab_jobs = st.tabs(["🔵 United Fire", "🟠 Jacksonville", "📁 Jobs"])
+    with tab_united:
+        render_united_form()
+    with tab_jax:
+        render_jax_form()
+    with tab_jobs:
+        render_jobs_tab()
+
+
+if __name__ == "__main__":
+    main()
