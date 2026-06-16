@@ -20,7 +20,7 @@ UNITED_STICKY_FIELDS = [
 ]
 JAX_STICKY_FIELDS = [
     "premises_name", "owner_name", "service_address", "mailing_address",
-    "physical_location", "contact_phone", "jea_account", "meter_number",
+    "contact_phone", "jea_account", "meter_number",
 ]
 
 UNITED_RESET_FIELDS = [
@@ -32,7 +32,7 @@ UNITED_RESET_FIELDS = [
     "assembly_result", "repair_desc",
 ]
 JAX_RESET_FIELDS = [
-    "device_type", "serial_number", "install_date",
+    "device_type", "serial_number", "install_date", "physical_location",
     "comm_test_purpose", "comm_service_type", "comm_reclaim", "comm_fire_bypass",
     "res_test_purpose", "res_service_type", "res_reclaim",
     "init_cv1_result", "init_cv1_psi", "init_cv2_result", "init_cv2_psi",
@@ -47,7 +47,7 @@ UNITED_RESET_WIDGET_KEYS = [
     "u_cv1dp", "u_cv2dp", "u_rvpsi", "u_aipsi", "u_cvpsi", "u_rep",
 ]
 JAX_RESET_WIDGET_KEYS = [
-    "j_dt", "j_sn", "j_id",
+    "j_dt", "j_sn", "j_id", "j_pl",
     "j_icv1p", "j_icv2p", "j_irvp", "j_ipvbp",
     "j_fcv1p", "j_fcv2p", "j_frvp", "j_rep",
 ]
@@ -754,26 +754,49 @@ def render_tester_banner(form_key: str, form_type: str):
                 v = st.text_input("Re-Cert Date", value=form.get("recert", ""), key="u_recert_display")
                 form["recert"] = v
         else:
+            # Initial Tester row
+            st.markdown("**Initial Tester**")
             col1, col2, col3 = st.columns(3)
             with col1:
                 v = st.text_input("Init Tester", value=form.get("init_tester_name", ""), key="j_itn_display")
                 form["init_tester_name"] = v
-                v = st.text_input("Repaired By", value=form.get("repaired_by", ""), key="j_rb_display")
-                form["repaired_by"] = v
-                v = st.text_input("Final Tester", value=form.get("final_tester_name", ""), key="j_ftn_display")
-                form["final_tester_name"] = v
             with col2:
                 v = st.text_input("Init Company", value=form.get("init_company", ""), key="j_ico_display")
                 form["init_company"] = v
-                v = st.text_input("Repair Company", value=form.get("repair_company", ""), key="j_rco_display")
-                form["repair_company"] = v
-                v = st.text_input("Final Company", value=form.get("final_company", ""), key="j_fco_display")
-                form["final_company"] = v
             with col3:
                 v = st.text_input("Init Cert", value=form.get("init_cert", ""), key="j_ic_display")
                 form["init_cert"] = v
-                v = st.text_input("Repair Cert", value=form.get("repair_cert", ""), key="j_rc_display")
-                form["repair_cert"] = v
+
+            # Repair row — only shown when assembly result is FAILED
+            assembly_result = form.get("assembly_result", "")
+            if assembly_result == "FAILED":
+                st.markdown("**Repaired By**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    v = st.text_input("Repaired By", value=form.get("repaired_by", ""), key="j_rb_display")
+                    form["repaired_by"] = v
+                with col2:
+                    v = st.text_input("Repair Company", value=form.get("repair_company", ""), key="j_rco_display")
+                    form["repair_company"] = v
+                with col3:
+                    v = st.text_input("Repair Cert", value=form.get("repair_cert", ""), key="j_rc_display")
+                    form["repair_cert"] = v
+            else:
+                # Clear repair fields when not FAILED so they don't bleed into the PDF
+                for fk in ("repaired_by", "repair_company", "repair_cert"):
+                    form.pop(fk, None)
+                st.caption("\u2139\ufe0f Repair row appears only when Assembly Result is FAILED.")
+
+            # Final Tester row
+            st.markdown("**Final Tester**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                v = st.text_input("Final Tester", value=form.get("final_tester_name", ""), key="j_ftn_display")
+                form["final_tester_name"] = v
+            with col2:
+                v = st.text_input("Final Company", value=form.get("final_company", ""), key="j_fco_display")
+                form["final_company"] = v
+            with col3:
                 v = st.text_input("Final Cert", value=form.get("final_cert", ""), key="j_fc_display")
                 form["final_cert"] = v
 
@@ -794,7 +817,8 @@ def render_united_form():
 
     st.subheader("\U0001f4cb United Fire Protection \u2014 Backflow Test Report")
 
-    with st.expander("\U0001f3e2 Site / Customer Info (stays between buildings)", expanded=not bool(form.get("customer_name"))):
+    with st.expander("\U0001f3e2 Site / Customer Info (sticky \u2014 stays between buildings)", expanded=not bool(form.get("customer_name"))):
+        st.caption("These fields persist until you manually clear them. Edit freely.")
         col1, col2 = st.columns(2)
         with col1:
             clearable_input("Customer Name", "united_form", "customer_name", "u_cust")
@@ -954,13 +978,12 @@ def render_jax_form():
 
     st.subheader("\U0001f4cb Jacksonville \u2014 Backflow Test Report")
 
-    with st.expander("\U0001f3e2 Premises / Owner Info (stays between buildings)", expanded=not bool(form.get("premises_name"))):
+    with st.expander("\U0001f3e2 Premises / Owner Info (sticky \u2014 stays between devices)", expanded=not bool(form.get("premises_name"))):
+        st.caption("These fields persist until you manually clear them. Edit freely.")
         col1, col2 = st.columns(2)
         with col1:
             clearable_input("Premises Name", "jax_form", "premises_name", "j_pn")
             clearable_input("Service Address", "jax_form", "service_address", "j_sa")
-            clearable_input("Physical Location", "jax_form", "physical_location", "j_pl",
-                            placeholder="e.g. Building A / Meter Room")
             clearable_input("JEA Account #", "jax_form", "jea_account", "j_jea")
         with col2:
             clearable_input("Owner Name", "jax_form", "owner_name", "j_on")
@@ -1019,6 +1042,8 @@ def render_jax_form():
         clearable_input("Device Type", "jax_form", "device_type", "j_dt")
         clearable_input("Serial Number", "jax_form", "serial_number", "j_sn")
         clearable_input("Install Date", "jax_form", "install_date", "j_id")
+        clearable_input("Physical Location", "jax_form", "physical_location", "j_pl",
+                        placeholder="e.g. Building A / Meter Room")
     with col2:
         clearable_input("Manufacturer", "jax_form", "manufacturer", "j_jmfg")
         clearable_input("Model Number", "jax_form", "model_number", "j_jmod")
@@ -1096,8 +1121,13 @@ def render_jax_form():
                           key="j_assembly_result")
         form["assembly_result"] = ar
     with col2:
-        rep = st.text_input("Repairs Made", value=form.get("repairs", ""), key="j_rep")
-        form["repairs"] = rep
+        # Repairs Made — only shown when FAILED
+        if form.get("assembly_result") == "FAILED":
+            rep = st.text_input("Repairs Made", value=form.get("repairs", ""), key="j_rep")
+            form["repairs"] = rep
+        else:
+            form.pop("repairs", None)
+            st.caption("\u2139\ufe0f Repairs field appears only when Assembly Result is FAILED.")
 
     synced_date_input("Signature Date", "jax_form", "signature_date", "j_sigdate",
                       ["init_test_date", "final_test_date", "repair_date"])
