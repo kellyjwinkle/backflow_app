@@ -21,6 +21,7 @@ UNITED_STICKY_FIELDS = [
 JAX_STICKY_FIELDS = [
     "premises_name", "owner_name", "service_address", "mailing_address",
     "contact_phone", "jea_account", "meter_number",
+    "manufacturer", "model_number", "size",
 ]
 
 UNITED_RESET_FIELDS = [
@@ -223,7 +224,7 @@ def reset_form_for_new_job(form_type: str):
         for f in JAX_RESET_FIELDS:
             form.pop(f, None)
         _clear_widget_keys(JAX_RESET_WIDGET_KEYS)
-        for k in ["j_comm_test_purpose", "j_comm_service_type", "j_comm_reclaim",
+        for k in ["j_dt", "j_comm_test_purpose", "j_comm_service_type", "j_comm_reclaim",
                   "j_res_test_purpose", "j_res_service_type", "j_res_reclaim",
                   "j_init_cv1_result", "j_init_cv2_result", "j_init_rv_result",
                   "j_init_pvb_result", "j_final_cv1_result", "j_final_cv2_result",
@@ -1039,7 +1040,14 @@ def render_jax_form():
     st.markdown("**\U0001f529 Device Info** *(clears after each save)*")
     col1, col2 = st.columns(2)
     with col1:
-        clearable_input("Device Type", "jax_form", "device_type", "j_dt")
+        dt_opts = ["", "RP", "DC", "PVB", "SVB"]
+        dt = st.selectbox(
+            "Device Type",
+            dt_opts,
+            index=dt_opts.index(form.get("device_type", "")) if form.get("device_type", "") in dt_opts else 0,
+            key="j_dt",
+        )
+        form["device_type"] = dt
         clearable_input("Serial Number", "jax_form", "serial_number", "j_sn")
         clearable_input("Install Date", "jax_form", "install_date", "j_id")
         clearable_input("Physical Location", "jax_form", "physical_location", "j_pl",
