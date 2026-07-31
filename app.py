@@ -13,6 +13,7 @@ TEMPLATE_UNITED = "backflow_template.pdf"
 TEMPLATE_JAX = "jacksonville_template.pdf"
 TECHNICIANS_FILE = "technicians.json"
 PAGE_W, PAGE_H = 612, 792
+JAX_PAGE_W, JAX_PAGE_H = 612, 792  # safe default; overridden in main() if template exists
 
 UNITED_STICKY_FIELDS = [
     "customer_name", "street_address", "branch", "ahj",
@@ -412,26 +413,46 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
 
 
 def apply_profile_to_forms(profile: dict):
-    _clear_widget_keys(
-        UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
-        + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
-    )
+    """Write a technician profile into both forms and clear stale widget keys.
+
+    FIX: jax_form and united_form are initialised BEFORE widget keys are
+    cleared, so the data is present on the very next rerun.
+    """
+    # 1. Ensure both form dicts exist first
+    _init_form("united_form")
+    _init_form("jax_form")
+
     if not profile:
+        _clear_widget_keys(
+            UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
+            + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
+        )
         return
+
+    # 2. Persist signature globally
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
-    _init_form("united_form")
+
+    # 3. Write into united_form
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
-    _init_form("jax_form")
+
+    # 4. Write into jax_form — map every JAX tester field from the profile
     jax = st.session_state["jax_form"]
     for jk, pk in JAX_TESTER_MAP.items():
         jax[jk] = profile.get(pk, "")
+    # Also store raw tester keys on jax_form so the banner can read them
     for tk in TESTER_KEYS:
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
+
+    # 5. Clear stale widget keys AFTER writing form data
+    _clear_widget_keys(
+        UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
+        + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -505,11 +526,14 @@ def generate_united_pdf(form_data: dict) -> bytes:
 
 
 def generate_jax_pdf(form_data: dict) -> bytes:
+    # Use module-level JAX_PAGE_W/H which are set in main() from the template
+    pw = globals().get("JAX_PAGE_W", 612)
+    ph = globals().get("JAX_PAGE_H", 792)
     reader = PdfReader(TEMPLATE_JAX)
     writer = PdfWriter()
     writer.append(reader)
     packet = BytesIO()
-    c = canvas.Canvas(packet, pagesize=(JAX_PAGE_W, JAX_PAGE_H))
+    c = canvas.Canvas(packet, pagesize=(pw, ph))
     for field, (x, y, sz) in JAX_TEXT_FIELDS.items():
         put_text(c, form_data.get(field, ""), x, y, sz)
     comm_tp = form_data.get("comm_test_purpose", "")
@@ -676,10 +700,12 @@ def render_technician_sidebar():
                 ok, msg = upsert_technician_profile(prof_name.strip(), new_profile)
                 if ok:
                     st.success(msg)
+                    # Force reload of the newly saved profile into both forms
+                    apply_profile_to_forms(new_profile)
+                    st.session_state["_sidebar_tech_sel"] = prof_name.strip()
+                    st.session_state["_last_loaded_tech"] = prof_name.strip()
                 else:
                     st.warning(msg)
-                st.session_state["_sidebar_tech_sel"] = prof_name.strip()
-                st.session_state["_last_loaded_tech"] = None
                 st.rerun()
             else:
                 st.error("Name cannot be empty.")
