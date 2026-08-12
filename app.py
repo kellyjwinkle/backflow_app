@@ -3,6 +3,7 @@ from io import BytesIO
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 import json, os, base64, zipfile
+import requests
 from datetime import date, datetime
 from pypdf import PdfReader, PdfWriter
 from PIL import Image
@@ -67,12 +68,93 @@ def _get_pdf_page_size(path):
 
 
 # ─────────────────────────────────────────
-# Technician helpers — LOCAL ONLY (no GitHub writes)
+# Technician helpers
 # ─────────────────────────────────────────
+
+# ─────────────────────────────────────────
+# GitHub-backed persistence for technicians.json
+#
+# Streamlit Cloud containers have EPHEMERAL local disk: every sleep/wake or
+# redeploy re-clones the repo fresh, wiping any local-only file writes.
+# To survive that, every technician save/delete also commits the updated
+# technicians.json straight back to this GitHub repo via the REST API, so
+# the next container start pulls the latest version instead of a blank one.
+#
+# Requires a Streamlit secret named GITHUB_TOKEN (a fine-grained GitHub
+# Personal Access Token with "Contents: Read and write" on this repo).
+# If the secret is missing, the app silently falls back to local-disk-only
+# storage (previous behavior) so nothing breaks without it configured.
+# ─────────────────────────────────────────
+GITHUB_REPO = "kellyjwinkle/backflow_app"
+GITHUB_BRANCH = "main"
+GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{TECHNICIANS_FILE}"
+
+
+def _github_token():
+    try:
+        return st.secrets.get("GITHUB_TOKEN", "")
+    except Exception:
+        return ""
+
+
+def _github_headers():
+    token = _github_token()
+    if not token:
+        return None
+    return {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
+
+
+def _github_fetch_technicians():
+    """Pull the latest technicians.json from GitHub. Returns (data, sha) or
+    (None, None) if unavailable (no token, network error, file not found)."""
+    headers = _github_headers()
+    if not headers:
+        return None, None
+    try:
+        resp = requests.get(f"{GITHUB_API_URL}?ref={GITHUB_BRANCH}", headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return None, None
+        payload = resp.json()
+        content = base64.b64decode(payload["content"]).decode("utf-8")
+        return json.loads(content), payload.get("sha")
+    except Exception:
+        return None, None
+
+
+def _github_push_technicians(data: dict):
+    """Push the current technicians dict to GitHub. Returns (ok, message)."""
+    headers = _github_headers()
+    if not headers:
+        return False, "GITHUB_TOKEN not configured — saved locally only (won't survive a redeploy)."
+    try:
+        sha = st.session_state.get("_technicians_github_sha")
+        if not sha:
+            _, sha = _github_fetch_technicians()
+        body = {
+            "message": "Update technicians.json via app",
+            "content": base64.b64encode(json.dumps(data, indent=2).encode("utf-8")).decode("utf-8"),
+            "branch": GITHUB_BRANCH,
+        }
+        if sha:
+            body["sha"] = sha
+        resp = requests.put(GITHUB_API_URL, headers=headers, json=body, timeout=8)
+        if resp.status_code in (200, 201):
+            new_sha = resp.json().get("content", {}).get("sha")
+            if new_sha:
+                st.session_state["_technicians_github_sha"] = new_sha
+            return True, "Synced to GitHub ✓"
+        return False, f"GitHub sync failed ({resp.status_code}): {resp.text[:200]}"
+    except Exception as e:
+        return False, f"GitHub sync error: {e}"
+
 
 def _init_technicians():
     if "technicians" not in st.session_state:
-        if os.path.exists(TECHNICIANS_FILE):
+        gh_data, gh_sha = _github_fetch_technicians()
+        if gh_data is not None:
+            st.session_state["technicians"] = gh_data
+            st.session_state["_technicians_github_sha"] = gh_sha
+        elif os.path.exists(TECHNICIANS_FILE):
             with open(TECHNICIANS_FILE, "r") as fh:
                 st.session_state["technicians"] = json.load(fh)
         else:
@@ -95,9 +177,16 @@ def upsert_technician_profile(name: str, profile: dict):
     try:
         with open(TECHNICIANS_FILE, "w") as fh:
             json.dump(st.session_state["technicians"], fh, indent=2)
-        return True, "Profile saved ✓"
+        local_ok, local_msg = True, "Profile saved ✓"
     except Exception as e:
-        return False, f"Save error: {e}"
+        local_ok, local_msg = False, f"Save error: {e}"
+
+    gh_ok, gh_msg = _github_push_technicians(st.session_state["technicians"])
+    if local_ok and gh_ok:
+        return True, "Profile saved ✓ (synced to GitHub)"
+    if local_ok and not gh_ok:
+        return True, f"Profile saved locally, but {gh_msg}"
+    return False, local_msg
 
 
 def delete_technician_profile(name: str):
@@ -108,9 +197,16 @@ def delete_technician_profile(name: str):
     try:
         with open(TECHNICIANS_FILE, "w") as fh:
             json.dump(st.session_state["technicians"], fh, indent=2)
-        return True, "Profile deleted."
+        local_ok, local_msg = True, "Profile deleted."
     except Exception as e:
-        return False, str(e)
+        local_ok, local_msg = False, str(e)
+
+    gh_ok, gh_msg = _github_push_technicians(st.session_state["technicians"])
+    if local_ok and gh_ok:
+        return True, "Profile deleted (synced to GitHub)."
+    if local_ok and not gh_ok:
+        return True, f"Profile deleted locally, but {gh_msg}"
+    return False, local_msg
 
 
 # ─────────────────────────────────────────
@@ -133,10 +229,6 @@ def add_job_to_session(form_data: dict, pdf_bytes: bytes, form_type: str):
         prem = form_data.get("premises_name", "unknown").replace(" ", "_").replace("/", "-")
         base = f"jax_{prem}_{serial}_{ts}" if serial else f"jax_{prem}_{ts}"
 
-    # Guarantee absolute filename uniqueness even if two rows share the same
-    # customer/serial/second (batch imports can generate many jobs within
-    # the same second, which previously caused StreamlitDuplicateElementKey
-    # crashes in render_jobs_tab and silently killed the whole app rerun).
     existing_filenames = {j.get("filename") for j in _jobs_store()}
     filename = f"{base}.pdf"
     suffix = 1
@@ -246,10 +338,6 @@ def reset_form_for_new_job(form_type: str):
             st.session_state.pop(k, None)
 
 
-# ─────────────────────────────────────────
-# PDF field maps
-# ─────────────────────────────────────────
-
 UNITED_TEXT_FIELDS = {
     "date": (135, 583, 8), "branch": (235, 583, 8), "ahj": (437, 583, 8),
     "customer_name": (200, 567, 8), "street_address": (200, 551, 8), "location": (200, 533, 8),
@@ -315,10 +403,6 @@ JAX_TESTER_MAP = {
 }
 
 
-# ─────────────────────────────────────────
-# Drawing helpers
-# ─────────────────────────────────────────
-
 def draw_x(c, bx, by, size=3.8):
     c.setStrokeColorRGB(1, 0, 0)
     c.setLineWidth(2.0)
@@ -347,10 +431,6 @@ def wrap_text(text, w=58):
         lines.append(line)
     return lines
 
-
-# ─────────────────────────────────────────
-# Form / session helpers
-# ─────────────────────────────────────────
 
 def _init_form(key, defaults=None):
     if key not in st.session_state:
@@ -426,12 +506,7 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
 
 
 def apply_profile_to_forms(profile: dict):
-    """Write a technician profile into both forms and clear stale widget keys.
-
-    FIX: jax_form and united_form are initialised BEFORE widget keys are
-    cleared, so the data is present on the very next rerun.
-    """
-    # 1. Ensure both form dicts exist first
+    """Write a technician profile into both forms and clear stale widget keys."""
     _init_form("united_form")
     _init_form("jax_form")
 
@@ -442,35 +517,26 @@ def apply_profile_to_forms(profile: dict):
         )
         return
 
-    # 2. Persist signature globally
     if profile.get("signature_b64"):
         st.session_state["signature_b64"] = profile["signature_b64"]
 
-    # 3. Write into united_form
     united = st.session_state["united_form"]
     for tk in TESTER_KEYS:
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
 
-    # 4. Write into jax_form — map every JAX tester field from the profile
     jax = st.session_state["jax_form"]
     for jk, pk in JAX_TESTER_MAP.items():
         jax[jk] = profile.get(pk, "")
-    # Also store raw tester keys on jax_form so the banner can read them
     for tk in TESTER_KEYS:
         jax[tk] = profile.get(tk, "")
     jax["signature_b64"] = profile.get("signature_b64", "")
 
-    # 5. Clear stale widget keys AFTER writing form data
     _clear_widget_keys(
         UNITED_TESTER_WIDGET_KEYS + JAX_TESTER_WIDGET_KEYS
         + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
     )
 
-
-# ─────────────────────────────────────────
-# PDF generators
-# ─────────────────────────────────────────
 
 def generate_united_pdf(form_data: dict) -> bytes:
     reader = PdfReader(TEMPLATE_UNITED)
@@ -539,7 +605,6 @@ def generate_united_pdf(form_data: dict) -> bytes:
 
 
 def generate_jax_pdf(form_data: dict) -> bytes:
-    # Use module-level JAX_PAGE_W/H which are set in main() from the template
     pw = globals().get("JAX_PAGE_W", 612)
     ph = globals().get("JAX_PAGE_H", 792)
     reader = PdfReader(TEMPLATE_JAX)
@@ -608,10 +673,6 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     writer.write(out)
     return out.getvalue()
 
-
-# ─────────────────────────────────────────
-# Sidebar — streamlined profile picker, edit collapsed
-# ─────────────────────────────────────────
 
 def render_technician_sidebar():
     st.sidebar.title("👤 Technician")
@@ -682,7 +743,7 @@ def render_technician_sidebar():
                 current["signature_b64"] = st.session_state.get("signature_b64", "")
                 ok, msg = upsert_technician_profile(selected, current)
                 if ok:
-                    st.success("Saved.")
+                    st.success(msg)
                 else:
                     st.warning(msg)
 
@@ -713,7 +774,6 @@ def render_technician_sidebar():
                 ok, msg = upsert_technician_profile(prof_name.strip(), new_profile)
                 if ok:
                     st.success(msg)
-                    # Force reload of the newly saved profile into both forms
                     apply_profile_to_forms(new_profile)
                     st.session_state["_sidebar_tech_sel"] = prof_name.strip()
                     st.session_state["_last_loaded_tech"] = prof_name.strip()
@@ -740,7 +800,7 @@ def render_technician_sidebar():
                         st.session_state["_sidebar_tech_sel"] = ""
                         st.session_state["_last_loaded_tech"] = None
                         clear_signature()
-                        st.sidebar.success("Deleted.")
+                        st.sidebar.success(msg)
                     else:
                         st.sidebar.warning(msg)
                     st.rerun()
@@ -749,10 +809,6 @@ def render_technician_sidebar():
                     st.session_state[confirm_key] = False
                     st.rerun()
 
-
-# ─────────────────────────────────────────
-# Tester info — compact collapsible banner
-# ─────────────────────────────────────────
 
 def render_tester_banner(form_key: str, form_type: str):
     _init_form(form_key)
@@ -794,7 +850,6 @@ def render_tester_banner(form_key: str, form_type: str):
                 v = st.text_input("Re-Cert Date", value=form.get("recert", ""), key="u_recert_display")
                 form["recert"] = v
         else:
-            # Initial Tester row
             st.markdown("**Initial Tester**")
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -807,7 +862,6 @@ def render_tester_banner(form_key: str, form_type: str):
                 v = st.text_input("Init Cert", value=form.get("init_cert", ""), key="j_ic_display")
                 form["init_cert"] = v
 
-            # Repair row — only shown when assembly result is FAILED
             assembly_result = form.get("assembly_result", "")
             if assembly_result == "FAILED":
                 st.markdown("**Repaired By**")
@@ -822,12 +876,10 @@ def render_tester_banner(form_key: str, form_type: str):
                     v = st.text_input("Repair Cert", value=form.get("repair_cert", ""), key="j_rc_display")
                     form["repair_cert"] = v
             else:
-                # Clear repair fields when not FAILED so they don't bleed into the PDF
                 for fk in ("repaired_by", "repair_company", "repair_cert"):
                     form.pop(fk, None)
                 st.caption("ℹ️ Repair row appears only when Assembly Result is FAILED.")
 
-            # Final Tester row
             st.markdown("**Final Tester**")
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -846,10 +898,6 @@ def render_tester_banner(form_key: str, form_type: str):
         else:
             st.caption("⚠️ No signature. Upload in sidebar.")
 
-
-# ─────────────────────────────────────────
-# United Fire form
-# ─────────────────────────────────────────
 
 def render_united_form():
     _init_form("united_form")
@@ -1008,10 +1056,6 @@ def render_united_form():
             )
 
 
-# ─────────────────────────────────────────
-# Jacksonville form
-# ─────────────────────────────────────────
-
 def render_jax_form():
     _init_form("jax_form")
     form = st.session_state["jax_form"]
@@ -1168,7 +1212,6 @@ def render_jax_form():
                           key="j_assembly_result")
         form["assembly_result"] = ar
     with col2:
-        # Repairs Made — only shown when FAILED
         if form.get("assembly_result") == "FAILED":
             rep = st.text_input("Repairs Made", value=form.get("repairs", ""), key="j_rep")
             form["repairs"] = rep
@@ -1214,10 +1257,6 @@ def render_jax_form():
             )
 
 
-# ─────────────────────────────────────────
-# Jobs tab — session-based, ZIP + Excel export
-# ─────────────────────────────────────────
-
 def render_jobs_tab():
     st.subheader("📁 Today's Jobs")
     all_jobs = _jobs_store()
@@ -1234,9 +1273,6 @@ def render_jobs_tab():
         fname = job.get("filename", "")
         result_icon = "✅" if job.get("assembly_result") == "PASSED" else ("❌" if job.get("assembly_result") == "FAILED" else "⬜")
         label = f"{result_icon}  {job.get('customer', '')} | {job.get('location', '')} | SN: {job.get('serial_number', '')} | {job.get('assembly_result', '')}"
-        # NOTE: key includes the loop index as a safety net so duplicate
-        # filenames (e.g. from a batch import) never collide and crash
-        # the whole app with StreamlitDuplicateElementKey.
         checked = st.checkbox(label, value=True, key=f"chk_{idx}_{fname}")
         if checked:
             selected_filenames.append(fname)
@@ -1298,10 +1334,6 @@ def render_jobs_tab():
                 st.session_state[confirm_clear] = False
                 st.rerun()
 
-
-# ─────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────
 
 def main():
     st.set_page_config(
