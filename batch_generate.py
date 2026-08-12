@@ -24,6 +24,7 @@ INTEGRATION (in app.py):
 """
 
 import io
+import re
 import zipfile
 from datetime import datetime
 
@@ -60,6 +61,7 @@ JAX_COLUMN_MAP = {
     "assembly results": "assembly_result",
     "signature": "final_tester_name",
     "date": "signature_date",
+    "signature date": "signature_date",
 }
 # Ordered pair for the duplicated "Test purpose / Service type / Reclaim /
 # Fire service bypass" column blocks -- first occurrence = Commercial,
@@ -111,6 +113,13 @@ def _normalize(col: str) -> str:
     return str(col).strip().lower()
 
 
+def _strip_dedupe_suffix(key: str) -> str:
+    """pandas auto-renames duplicate column headers to 'name', 'name.1',
+    'name.2', ... on read. Strip that suffix so duplicate-block matching
+    still works."""
+    return re.sub(r"\.\d+$", "", key)
+
+
 def _resolve_duplicate_columns(columns: list) -> dict:
     """Handle the JAX sheet's repeated headers (Test purpose, Service type,
     Reclaim, Fire service bypass appear twice: commercial then residential).
@@ -118,7 +127,7 @@ def _resolve_duplicate_columns(columns: list) -> dict:
     seen = {}
     resolved = {}
     for idx, col in enumerate(columns):
-        key = _normalize(col)
+        key = _strip_dedupe_suffix(_normalize(col))
         for base, targets in JAX_DUPLICATE_BLOCKS:
             if key == base:
                 n = seen.get(base, 0)
@@ -141,7 +150,7 @@ def row_to_form_data(row, columns: list, fmt: str) -> dict:
         if idx in dup_resolved:
             mapped_key = dup_resolved[idx]
         else:
-            mapped_key = col_map.get(key)
+            mapped_key = col_map.get(key) or col_map.get(_strip_dedupe_suffix(key))
         if not mapped_key:
             continue
         if mapped_key in BOOL_KEYS:
@@ -211,6 +220,50 @@ def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
     return buf.getvalue(), count, errors
 
 
+def _build_blank_template() -> bytes:
+    """In-memory blank .xlsx with the exact header rows the two column
+    maps above expect -- Jacksonville and United, headers on row 1,
+    no sample data. Must stay in sync with header=0 read below."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    jax_headers = [
+        "Premise name", "Owner name", "Service address", "Mailing address", "JEA Account #",
+        "Contact phone", "Meter number", "Test purpose", "Service type", "Reclaim",
+        "Fire service bypass", "Test purpose", "Service type", "Reclaim", "Fire service bypass",
+        "Device type", "Serial number", "Install date", "Physical location", "Manufacturer",
+        "Model number", "Size", "Cv1", "Cv1 PSI", "CV2", "CV2 PSI", "INIT RV", "INIT PSI",
+        "INIT PVB", "INIT PVB PSI", "ASSEMBLY RESULTS", "SIGNATURE DATE",
+    ]
+    united_headers = [
+        "CUSTOMER NAME", "STREET ADDRESS", "BRANCH", "AHJ", "MANUFACTURER", "MODEL", "SIZE",
+        "TEST DATE", "SERIAL NUMBER", "LOCATION/BUILDING", "ASSEMBLY TYPE", "SYSTEM SERVICE",
+        "BYPASS", "CV1 RESULT", "CV1 DIFFERENTIAL PRESSURE", "CV2 RESULT", "CV2 DIFFERENTIAL PRESSURE",
+        "RV RESULT", "RV OPENED AT PSI", "RV OUTLET", "RV INLET", "AIR INLET RESULT", "AIR INLET PSI",
+        "CV RESULT", "CV PSI", "ASSEMBLY RESULT",
+    ]
+
+    def _write(ws, headers):
+        fill = PatternFill("solid", fgColor="1F4E79")
+        font = Font(color="FFFFFF", bold=True)
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.fill = fill
+            cell.font = font
+            ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 20
+
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Jacksonville"
+    _write(ws1, jax_headers)
+    ws2 = wb.create_sheet("United")
+    _write(ws2, united_headers)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None):
     """Streamlit UI: call this inside a tab in app.py's main()."""
     st.subheader("Batch Generate Reports")
@@ -219,46 +272,6 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
         "One tab for Jacksonville-format devices, one for United-format devices. "
         "Every row becomes one PDF."
     )
-
-    def _build_blank_template() -> bytes:
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill
-
-        wb = openpyxl.Workbook()
-        jax_headers = [
-            "Premise name", "Owner name", "Service address", "Mailing address", "JEA Account #",
-            "Contact phone", "Meter number", "Test purpose", "Service type", "Reclaim",
-            "Fire service bypass", "Test purpose", "Service type", "Reclaim", "Fire service bypass",
-            "Device type", "Serial number", "Install date", "Physical location", "Manufacturer",
-            "Model number", "Size", "Cv1", "Cv1 PSI", "CV2", "CV2 PSI", "INIT RV", "INIT PSI",
-            "INIT PVB", "INIT PVB PSI", "ASSEMBLY RESULTS", "SIGNATURE DATE",
-        ]
-        united_headers = [
-            "CUSTOMER NAME", "STREET ADDRESS", "BRANCH", "AHJ", "MANUFACTURER", "MODEL", "SIZE",
-            "TEST DATE", "SERIAL NUMBER", "LOCATION/BUILDING", "ASSEMBLY TYPE", "SYSTEM SERVICE",
-            "BYPASS", "CV1 RESULT", "CV1 DIFFERENTIAL PRESSURE", "CV2 RESULT", "CV2 DIFFERENTIAL PRESSURE",
-            "RV RESULT", "RV OPENED AT PSI", "RV OUTLET", "RV INLET", "AIR INLET RESULT", "AIR INLET PSI",
-            "CV RESULT", "CV PSI", "ASSEMBLY RESULT",
-        ]
-
-        def _write(ws, headers):
-            fill = PatternFill("solid", fgColor="1F4E79")
-            font = Font(color="FFFFFF", bold=True)
-            for col, h in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col, value=h)
-                cell.fill = fill
-                cell.font = font
-                ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 20
-
-        ws1 = wb.active
-        ws1.title = "Jacksonville"
-        _write(ws1, jax_headers)
-        ws2 = wb.create_sheet("United")
-        _write(ws2, united_headers)
-
-        out = io.BytesIO()
-        wb.save(out)
-        return out.getvalue()
 
     st.download_button(
         "\u2b07\ufe0f Download Blank Template",
@@ -272,7 +285,11 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
     if not uploaded:
         return
 
-    sheets = pd.read_excel(uploaded, sheet_name=None, header=1)
+    # NOTE: header=0 -- headers live on row 1 of each sheet (matches the
+    # blank template above). Previously this was header=1, which silently
+    # skipped the real header row and treated the first data row as
+    # headers, causing every row to map to nothing and 0 PDFs to generate.
+    sheets = pd.read_excel(uploaded, sheet_name=None, header=0)
     sheet_name = st.selectbox("Sheet to process", list(sheets.keys()), key="batch_sheet_select")
     df = sheets[sheet_name].dropna(how="all")
 
@@ -310,6 +327,11 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
                         pass
 
         st.success(f"Generated {count} of {len(df)} reports.")
+        if count == 0:
+            st.error(
+                "No rows matched. Make sure the sheet's header row (row 1) uses the exact "
+                "column names from the 'Download Blank Template' button above."
+            )
         if errors:
             st.warning("Some rows failed:\n" + "\n".join(errors))
 
@@ -318,4 +340,4 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
             data=zip_bytes,
             file_name=f"backflow_batch_{fmt}_{datetime.now():%Y%m%d_%H%M}.zip",
             mime="application/zip",
-)
+        )
