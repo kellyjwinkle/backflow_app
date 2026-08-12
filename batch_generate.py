@@ -220,6 +220,54 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
         "Every row becomes one PDF."
     )
 
+    def _build_blank_template() -> bytes:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill
+
+        wb = openpyxl.Workbook()
+        jax_headers = [
+            "Premise name", "Owner name", "Service address", "Mailing address", "JEA Account #",
+            "Contact phone", "Meter number", "Test purpose", "Service type", "Reclaim",
+            "Fire service bypass", "Test purpose", "Service type", "Reclaim", "Fire service bypass",
+            "Device type", "Serial number", "Install date", "Physical location", "Manufacturer",
+            "Model number", "Size", "Cv1", "Cv1 PSI", "CV2", "CV2 PSI", "INIT RV", "INIT PSI",
+            "INIT PVB", "INIT PVB PSI", "ASSEMBLY RESULTS", "SIGNATURE DATE",
+        ]
+        united_headers = [
+            "CUSTOMER NAME", "STREET ADDRESS", "BRANCH", "AHJ", "MANUFACTURER", "MODEL", "SIZE",
+            "TEST DATE", "SERIAL NUMBER", "LOCATION/BUILDING", "ASSEMBLY TYPE", "SYSTEM SERVICE",
+            "BYPASS", "CV1 RESULT", "CV1 DIFFERENTIAL PRESSURE", "CV2 RESULT", "CV2 DIFFERENTIAL PRESSURE",
+            "RV RESULT", "RV OPENED AT PSI", "RV OUTLET", "RV INLET", "AIR INLET RESULT", "AIR INLET PSI",
+            "CV RESULT", "CV PSI", "ASSEMBLY RESULT",
+        ]
+
+        def _write(ws, headers):
+            fill = PatternFill("solid", fgColor="1F4E79")
+            font = Font(color="FFFFFF", bold=True)
+            for col, h in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col, value=h)
+                cell.fill = fill
+                cell.font = font
+                ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 20
+
+        ws1 = wb.active
+        ws1.title = "Jacksonville"
+        _write(ws1, jax_headers)
+        ws2 = wb.create_sheet("United")
+        _write(ws2, united_headers)
+
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
+
+    st.download_button(
+        "\u2b07\ufe0f Download Blank Template",
+        data=_build_blank_template(),
+        file_name="Backflow_Batch_Template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_batch_template",
+    )
+
     uploaded = st.file_uploader("Spreadsheet (.xlsx)", type=["xlsx"], key="batch_upload")
     if not uploaded:
         return
@@ -270,4 +318,4 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
             data=zip_bytes,
             file_name=f"backflow_batch_{fmt}_{datetime.now():%Y%m%d_%H%M}.zip",
             mime="application/zip",
-        )
+)
