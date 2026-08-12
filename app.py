@@ -8,6 +8,7 @@ from pypdf import PdfReader, PdfWriter
 from PIL import Image
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
+from batch_generate import render_batch_tab
 
 TEMPLATE_UNITED = "backflow_template.pdf"
 TEMPLATE_JAX = "jacksonville_template.pdf"
@@ -601,7 +602,7 @@ def generate_jax_pdf(form_data: dict) -> bytes:
 # ─────────────────────────────────────────────────────────────
 
 def render_technician_sidebar():
-    st.sidebar.title("\U0001f464 Technician")
+    st.sidebar.title("👤 Technician")
     names = get_technician_names()
     prev_sel = st.session_state.get("_sidebar_tech_sel", "")
     if prev_sel not in names:
@@ -627,11 +628,11 @@ def render_technician_sidebar():
         if sig_b64:
             st.sidebar.image(base64.b64decode(sig_b64), caption="Signature on file", use_container_width=True)
         else:
-            st.sidebar.caption("\u26a0\ufe0f No signature for this profile.")
+            st.sidebar.caption("⚠️ No signature for this profile.")
 
     st.sidebar.divider()
 
-    with st.sidebar.expander("\u270f\ufe0f Signature", expanded=False):
+    with st.sidebar.expander("✏️ Signature", expanded=False):
         upload = st.file_uploader("Upload (PNG preferred)", type=["png", "jpg", "jpeg"], key="sig_upload")
         if upload is not None:
             try:
@@ -660,11 +661,11 @@ def render_technician_sidebar():
 
         col_sig1, col_sig2 = st.columns(2)
         with col_sig1:
-            if st.button("\U0001f5d1\ufe0f Clear", key="sb_clear_sig"):
+            if st.button("🗑️ Clear", key="sb_clear_sig"):
                 clear_signature()
                 st.rerun()
         with col_sig2:
-            if selected and st.button("\U0001f4be Save to Profile", key="save_sig_to_profile"):
+            if selected and st.button("💾 Save to Profile", key="save_sig_to_profile"):
                 current = get_technician_profile(selected)
                 current["signature_b64"] = st.session_state.get("signature_b64", "")
                 ok, msg = upsert_technician_profile(selected, current)
@@ -673,7 +674,7 @@ def render_technician_sidebar():
                 else:
                     st.warning(msg)
 
-    with st.sidebar.expander("\u2699\ufe0f Edit / Add Profile", expanded=False):
+    with st.sidebar.expander("⚙️ Edit / Add Profile", expanded=False):
         current = get_technician_profile(selected) if selected else {}
         prof_name = st.text_input("Name", value=selected, key="prof_name")
         prof_co = st.text_input("Company", value=current.get("company", ""), key="prof_co")
@@ -685,7 +686,7 @@ def render_technician_sidebar():
         if current.get("signature_b64"):
             st.caption("Saved signature:")
             st.image(base64.b64decode(current["signature_b64"]), width=180)
-        if st.button("\U0001f4be Save Profile", key="save_profile_btn"):
+        if st.button("💾 Save Profile", key="save_profile_btn"):
             if prof_name.strip():
                 new_profile = {
                     "technician": prof_name.strip(),
@@ -713,14 +714,14 @@ def render_technician_sidebar():
     if selected:
         confirm_key = "_confirm_delete_profile"
         if not st.session_state.get(confirm_key, False):
-            if st.sidebar.button("\U0001f5d1\ufe0f Delete Profile", key="delete_profile_btn"):
+            if st.sidebar.button("🗑️ Delete Profile", key="delete_profile_btn"):
                 st.session_state[confirm_key] = True
                 st.rerun()
         else:
             st.sidebar.warning(f"Delete **{selected}**?")
             col_yes, col_no = st.sidebar.columns(2)
             with col_yes:
-                if st.button("\u2705 Yes", key="confirm_delete_yes"):
+                if st.button("✅ Yes", key="confirm_delete_yes"):
                     ok, msg = delete_technician_profile(selected)
                     st.session_state[confirm_key] = False
                     if ok:
@@ -732,7 +733,7 @@ def render_technician_sidebar():
                         st.sidebar.warning(msg)
                     st.rerun()
             with col_no:
-                if st.button("\u274c Cancel", key="confirm_delete_no"):
+                if st.button("❌ Cancel", key="confirm_delete_no"):
                     st.session_state[confirm_key] = False
                     st.rerun()
 
@@ -747,12 +748,12 @@ def render_tester_banner(form_key: str, form_type: str):
     selected_tech = st.session_state.get("_sidebar_tech_sel", "")
 
     if not selected_tech:
-        st.warning("\u26a0\ufe0f Select a technician profile in the sidebar.")
+        st.warning("⚠️ Select a technician profile in the sidebar.")
         return
 
-    with st.expander(f"\U0001f527 Tester: {selected_tech} \u2014 tap to review/edit", expanded=False):
+    with st.expander(f"🔧 Tester: {selected_tech} — tap to review/edit", expanded=False):
         reset_key = f"{form_type}_reset_tester"
-        if st.button("\U0001f504 Reset from Profile", key=reset_key):
+        if st.button("🔄 Reset from Profile", key=reset_key):
             profile = get_technician_profile(selected_tech)
             if form_type == "united":
                 for tk in TESTER_KEYS:
@@ -812,7 +813,7 @@ def render_tester_banner(form_key: str, form_type: str):
                 # Clear repair fields when not FAILED so they don't bleed into the PDF
                 for fk in ("repaired_by", "repair_company", "repair_cert"):
                     form.pop(fk, None)
-                st.caption("\u2139\ufe0f Repair row appears only when Assembly Result is FAILED.")
+                st.caption("ℹ️ Repair row appears only when Assembly Result is FAILED.")
 
             # Final Tester row
             st.markdown("**Final Tester**")
@@ -831,7 +832,7 @@ def render_tester_banner(form_key: str, form_type: str):
         if sig_b64:
             st.image(base64.b64decode(sig_b64), caption="Signature on file", width=180)
         else:
-            st.caption("\u26a0\ufe0f No signature. Upload in sidebar.")
+            st.caption("⚠️ No signature. Upload in sidebar.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -842,9 +843,9 @@ def render_united_form():
     _init_form("united_form")
     form = st.session_state["united_form"]
 
-    st.subheader("\U0001f4cb United Fire Protection \u2014 Backflow Test Report")
+    st.subheader("📋 United Fire Protection — Backflow Test Report")
 
-    with st.expander("\U0001f3e2 Site / Customer Info (sticky \u2014 stays between buildings)", expanded=not bool(form.get("customer_name"))):
+    with st.expander("🏢 Site / Customer Info (sticky — stays between buildings)", expanded=not bool(form.get("customer_name"))):
         st.caption("These fields persist until you manually clear them. Edit freely.")
         col1, col2 = st.columns(2)
         with col1:
@@ -858,7 +859,7 @@ def render_united_form():
             clearable_input("Size", "united_form", "size", "u_size")
 
     st.divider()
-    st.markdown("**\U0001f529 Assembly / Building Info** *(clears after each save)*")
+    st.markdown("**🔩 Assembly / Building Info** *(clears after each save)*")
     col1, col2 = st.columns(2)
     with col1:
         synced_date_input("Test Date", "united_form", "date", "u_date", ["test_date"])
@@ -883,7 +884,7 @@ def render_united_form():
         form["bypass"] = bypass
 
     st.divider()
-    st.markdown("**\U0001f4ca Test Results**")
+    st.markdown("**📊 Test Results**")
     atype_val = form.get("assembly_type", "")
 
     if atype_val in ("", "RP", "DC"):
@@ -964,11 +965,11 @@ def render_united_form():
     st.divider()
     col_save, col_dl = st.columns(2)
     with col_save:
-        if st.button("\u2705 Save & Next Building", key="u_save_job", type="primary", use_container_width=True):
+        if st.button("✅ Save & Next Building", key="u_save_job", type="primary", use_container_width=True):
             try:
                 pdf_bytes = generate_united_pdf(form)
                 filename = add_job_to_session(form, pdf_bytes, "united")
-                st.success(f"\u2713 Saved: {filename}")
+                st.success(f"✓ Saved: {filename}")
                 reset_form_for_new_job("united")
                 st.session_state.pop("u_pdf_bytes", None)
                 st.rerun()
@@ -976,7 +977,7 @@ def render_united_form():
                 st.error(f"Save failed: {e}")
 
     if "u_pdf_bytes" not in st.session_state:
-        if st.button("\U0001f5a8\ufe0f Preview PDF (no save)", key="u_gen_pdf", use_container_width=True):
+        if st.button("🖨️ Preview PDF (no save)", key="u_gen_pdf", use_container_width=True):
             try:
                 st.session_state["u_pdf_bytes"] = generate_united_pdf(form)
             except Exception as e:
@@ -986,7 +987,7 @@ def render_united_form():
         with col_dl:
             loc_slug = form.get("location", "").replace(" ", "_")
             st.download_button(
-                "\u2b07\ufe0f Download PDF",
+                "⬇️ Download PDF",
                 data=st.session_state["u_pdf_bytes"],
                 file_name=f"backflow_{form.get('customer_name','report')}_{loc_slug}_{date.today().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf",
@@ -1003,9 +1004,9 @@ def render_jax_form():
     _init_form("jax_form")
     form = st.session_state["jax_form"]
 
-    st.subheader("\U0001f4cb Jacksonville \u2014 Backflow Test Report")
+    st.subheader("📋 Jacksonville — Backflow Test Report")
 
-    with st.expander("\U0001f3e2 Premises / Owner Info (sticky \u2014 stays between devices)", expanded=not bool(form.get("premises_name"))):
+    with st.expander("🏢 Premises / Owner Info (sticky — stays between devices)", expanded=not bool(form.get("premises_name"))):
         st.caption("These fields persist until you manually clear them. Edit freely.")
         col1, col2 = st.columns(2)
         with col1:
@@ -1063,7 +1064,7 @@ def render_jax_form():
         form["res_reclaim"] = res_rc
 
     st.divider()
-    st.markdown("**\U0001f529 Device Info** *(clears after each save)*")
+    st.markdown("**🔩 Device Info** *(clears after each save)*")
     col1, col2 = st.columns(2)
     with col1:
         dt_opts = ["", "RP", "DC", "PVB", "SVB"]
@@ -1161,7 +1162,7 @@ def render_jax_form():
             form["repairs"] = rep
         else:
             form.pop("repairs", None)
-            st.caption("\u2139\ufe0f Repairs field appears only when Assembly Result is FAILED.")
+            st.caption("ℹ️ Repairs field appears only when Assembly Result is FAILED.")
 
     synced_date_input("Signature Date", "jax_form", "signature_date", "j_sigdate",
                       ["init_test_date", "final_test_date", "repair_date"])
@@ -1171,11 +1172,11 @@ def render_jax_form():
     st.divider()
     col_save, col_dl = st.columns(2)
     with col_save:
-        if st.button("\u2705 Save & Next Building", key="j_save_job", type="primary", use_container_width=True):
+        if st.button("✅ Save & Next Building", key="j_save_job", type="primary", use_container_width=True):
             try:
                 pdf_bytes = generate_jax_pdf(form)
                 filename = add_job_to_session(form, pdf_bytes, "jax")
-                st.success(f"\u2713 Saved: {filename}")
+                st.success(f"✓ Saved: {filename}")
                 reset_form_for_new_job("jax")
                 st.session_state.pop("j_pdf_bytes", None)
                 st.rerun()
@@ -1183,7 +1184,7 @@ def render_jax_form():
                 st.error(f"Save failed: {e}")
 
     if "j_pdf_bytes" not in st.session_state:
-        if st.button("\U0001f5a8\ufe0f Preview PDF (no save)", key="j_gen_pdf", use_container_width=True):
+        if st.button("🖨️ Preview PDF (no save)", key="j_gen_pdf", use_container_width=True):
             try:
                 st.session_state["j_pdf_bytes"] = generate_jax_pdf(form)
             except Exception as e:
@@ -1192,7 +1193,7 @@ def render_jax_form():
     if "j_pdf_bytes" in st.session_state:
         with col_dl:
             st.download_button(
-                "\u2b07\ufe0f Download PDF",
+                "⬇️ Download PDF",
                 data=st.session_state["j_pdf_bytes"],
                 file_name=f"jax_backflow_{form.get('premises_name','report')}_{date.today().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf",
@@ -1206,7 +1207,7 @@ def render_jax_form():
 # ─────────────────────────────────────────────────────────────
 
 def render_jobs_tab():
-    st.subheader("\U0001f4c1 Today's Jobs")
+    st.subheader("📁 Today's Jobs")
     all_jobs = _jobs_store()
 
     if not all_jobs:
@@ -1214,12 +1215,12 @@ def render_jobs_tab():
         return
 
     today_str = datetime.now().strftime("%Y-%m-%d")
-    st.markdown(f"**{len(all_jobs)} report(s) this session \u2014 {datetime.now().strftime('%m/%d/%Y')}**")
+    st.markdown(f"**{len(all_jobs)} report(s) this session — {datetime.now().strftime('%m/%d/%Y')}**")
 
     selected_filenames = []
     for job in all_jobs:
         fname = job.get("filename", "")
-        result_icon = "\u2705" if job.get("assembly_result") == "PASSED" else ("\u274c" if job.get("assembly_result") == "FAILED" else "\u2b1c")
+        result_icon = "✅" if job.get("assembly_result") == "PASSED" else ("❌" if job.get("assembly_result") == "FAILED" else "⬜")
         label = f"{result_icon}  {job.get('customer', '')} | {job.get('location', '')} | SN: {job.get('serial_number', '')} | {job.get('assembly_result', '')}"
         checked = st.checkbox(label, value=True, key=f"chk_{fname}")
         if checked:
@@ -1227,7 +1228,7 @@ def render_jobs_tab():
         pdf_bytes = job.get("pdf_bytes")
         if pdf_bytes:
             st.download_button(
-                f"\u2b07\ufe0f {fname}",
+                f"⬇️ {fname}",
                 data=pdf_bytes,
                 file_name=fname,
                 mime="application/pdf",
@@ -1240,11 +1241,11 @@ def render_jobs_tab():
     if selected_jobs:
         col_zip, col_excel = st.columns(2)
         with col_zip:
-            if st.button(f"\U0001f4e6 Build ZIP ({len(selected_jobs)} PDFs + Excel)", key="dl_zip", use_container_width=True):
+            if st.button(f"📦 Build ZIP ({len(selected_jobs)} PDFs + Excel)", key="dl_zip", use_container_width=True):
                 with st.spinner("Building ZIP..."):
                     zip_bytes = build_session_zip(selected_jobs, all_jobs)
                 st.download_button(
-                    "\u2b07\ufe0f Download ZIP",
+                    "⬇️ Download ZIP",
                     data=zip_bytes,
                     file_name=f"backflow_jobs_{today_str}.zip",
                     mime="application/zip",
@@ -1252,10 +1253,10 @@ def render_jobs_tab():
                     use_container_width=True,
                 )
         with col_excel:
-            if st.button("\U0001f4ca Export Excel Only", key="export_excel", use_container_width=True):
+            if st.button("📊 Export Excel Only", key="export_excel", use_container_width=True):
                 excel_bytes = build_jobs_excel(all_jobs)
                 st.download_button(
-                    "\u2b07\ufe0f Download Excel",
+                    "⬇️ Download Excel",
                     data=excel_bytes,
                     file_name=f"backflow_jobs_{today_str}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1266,19 +1267,19 @@ def render_jobs_tab():
     st.divider()
     confirm_clear = "_confirm_clear_session"
     if not st.session_state.get(confirm_clear, False):
-        if st.button("\U0001f5d1\ufe0f Clear Session Jobs", key="clear_session_btn"):
+        if st.button("🗑️ Clear Session Jobs", key="clear_session_btn"):
             st.session_state[confirm_clear] = True
             st.rerun()
     else:
-        st.warning("\u26a0\ufe0f This will remove all jobs from this session.")
+        st.warning("⚠️ This will remove all jobs from this session.")
         col_yes, col_no = st.columns(2)
         with col_yes:
-            if st.button("\u2705 Yes, clear", key="confirm_clear_yes"):
+            if st.button("✅ Yes, clear", key="confirm_clear_yes"):
                 st.session_state["_session_jobs"] = []
                 st.session_state[confirm_clear] = False
                 st.rerun()
         with col_no:
-            if st.button("\u274c Cancel", key="confirm_clear_no"):
+            if st.button("❌ Cancel", key="confirm_clear_no"):
                 st.session_state[confirm_clear] = False
                 st.rerun()
 
@@ -1290,7 +1291,7 @@ def render_jobs_tab():
 def main():
     st.set_page_config(
         page_title="Backflow Test Reports",
-        page_icon="\U0001f4a7",
+        page_icon="💧",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
@@ -1300,13 +1301,17 @@ def main():
         JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
 
     render_technician_sidebar()
-    tab_united, tab_jax, tab_jobs = st.tabs(["\U0001f535 United Fire", "\U0001f7e0 Jacksonville", "\U0001f4c1 Jobs"])
+    tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
+        ["🔵 United Fire", "🟠 Jacksonville", "📁 Jobs", "📊 Batch Generate"]
+    )
     with tab_united:
         render_united_form()
     with tab_jax:
         render_jax_form()
     with tab_jobs:
         render_jobs_tab()
+    with tab_batch:
+        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
 
 
 if __name__ == "__main__":
