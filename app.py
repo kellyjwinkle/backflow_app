@@ -66,9 +66,9 @@ def _get_pdf_page_size(path):
         return 595, 842
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Technician helpers — LOCAL ONLY (no GitHub writes)
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def _init_technicians():
     if "technicians" not in st.session_state:
@@ -113,9 +113,9 @@ def delete_technician_profile(name: str):
         return False, str(e)
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # In-session job store (PDFs in memory / direct device download)
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def _jobs_store():
     if "_session_jobs" not in st.session_state:
@@ -124,13 +124,25 @@ def _jobs_store():
 
 
 def add_job_to_session(form_data: dict, pdf_bytes: bytes, form_type: str):
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S%f")
+    serial = str(form_data.get("serial_number", "")).replace(" ", "_").replace("/", "-")
     if form_type == "united":
         cust = form_data.get("customer_name", "unknown").replace(" ", "_").replace("/", "-")
-        filename = f"united_{cust}_{ts}.pdf"
+        base = f"united_{cust}_{serial}_{ts}" if serial else f"united_{cust}_{ts}"
     else:
         prem = form_data.get("premises_name", "unknown").replace(" ", "_").replace("/", "-")
-        filename = f"jax_{prem}_{ts}.pdf"
+        base = f"jax_{prem}_{serial}_{ts}" if serial else f"jax_{prem}_{ts}"
+
+    # Guarantee absolute filename uniqueness even if two rows share the same
+    # customer/serial/second (batch imports can generate many jobs within
+    # the same second, which previously caused StreamlitDuplicateElementKey
+    # crashes in render_jobs_tab and silently killed the whole app rerun).
+    existing_filenames = {j.get("filename") for j in _jobs_store()}
+    filename = f"{base}.pdf"
+    suffix = 1
+    while filename in existing_filenames:
+        filename = f"{base}_{suffix}.pdf"
+        suffix += 1
 
     job_entry = {
         "filename": filename,
@@ -234,9 +246,9 @@ def reset_form_for_new_job(form_type: str):
             st.session_state.pop(k, None)
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # PDF field maps
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 UNITED_TEXT_FIELDS = {
     "date": (135, 583, 8), "branch": (235, 583, 8), "ahj": (437, 583, 8),
@@ -303,9 +315,9 @@ JAX_TESTER_MAP = {
 }
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Drawing helpers
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def draw_x(c, bx, by, size=3.8):
     c.setStrokeColorRGB(1, 0, 0)
@@ -336,9 +348,9 @@ def wrap_text(text, w=58):
     return lines
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Form / session helpers
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def _init_form(key, defaults=None):
     if key not in st.session_state:
@@ -456,9 +468,9 @@ def apply_profile_to_forms(profile: dict):
     )
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # PDF generators
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def generate_united_pdf(form_data: dict) -> bytes:
     reader = PdfReader(TEMPLATE_UNITED)
@@ -597,9 +609,9 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     return out.getvalue()
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Sidebar — streamlined profile picker, edit collapsed
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def render_technician_sidebar():
     st.sidebar.title("👤 Technician")
@@ -738,9 +750,9 @@ def render_technician_sidebar():
                     st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Tester info — compact collapsible banner
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def render_tester_banner(form_key: str, form_type: str):
     _init_form(form_key)
@@ -835,9 +847,9 @@ def render_tester_banner(form_key: str, form_type: str):
             st.caption("⚠️ No signature. Upload in sidebar.")
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # United Fire form
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def render_united_form():
     _init_form("united_form")
@@ -996,9 +1008,9 @@ def render_united_form():
             )
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Jacksonville form
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def render_jax_form():
     _init_form("jax_form")
@@ -1202,9 +1214,9 @@ def render_jax_form():
             )
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Jobs tab — session-based, ZIP + Excel export
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def render_jobs_tab():
     st.subheader("📁 Today's Jobs")
@@ -1218,11 +1230,14 @@ def render_jobs_tab():
     st.markdown(f"**{len(all_jobs)} report(s) this session — {datetime.now().strftime('%m/%d/%Y')}**")
 
     selected_filenames = []
-    for job in all_jobs:
+    for idx, job in enumerate(all_jobs):
         fname = job.get("filename", "")
         result_icon = "✅" if job.get("assembly_result") == "PASSED" else ("❌" if job.get("assembly_result") == "FAILED" else "⬜")
         label = f"{result_icon}  {job.get('customer', '')} | {job.get('location', '')} | SN: {job.get('serial_number', '')} | {job.get('assembly_result', '')}"
-        checked = st.checkbox(label, value=True, key=f"chk_{fname}")
+        # NOTE: key includes the loop index as a safety net so duplicate
+        # filenames (e.g. from a batch import) never collide and crash
+        # the whole app with StreamlitDuplicateElementKey.
+        checked = st.checkbox(label, value=True, key=f"chk_{idx}_{fname}")
         if checked:
             selected_filenames.append(fname)
         pdf_bytes = job.get("pdf_bytes")
@@ -1232,7 +1247,7 @@ def render_jobs_tab():
                 data=pdf_bytes,
                 file_name=fname,
                 mime="application/pdf",
-                key=f"dl_{fname}",
+                key=f"dl_{idx}_{fname}",
             )
         st.divider()
 
@@ -1284,9 +1299,9 @@ def render_jobs_tab():
                 st.rerun()
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 
 def main():
     st.set_page_config(
