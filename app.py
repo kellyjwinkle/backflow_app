@@ -15,7 +15,7 @@ TEMPLATE_UNITED = "backflow_template.pdf"
 TEMPLATE_JAX = "jacksonville_template.pdf"
 TECHNICIANS_FILE = "technicians.json"
 PAGE_W, PAGE_H = 612, 792
-JAX_PAGE_W, JAX_PAGE_H = 612, 792  # safe default; overridden in main() if template exists
+JAX_PAGE_W, JAX_PAGE_H = 612, 792
 
 UNITED_STICKY_FIELDS = [
     "customer_name", "street_address", "branch", "ahj",
@@ -67,11 +67,8 @@ def _get_pdf_page_size(path):
         return 595, 842
 
 
-# ─────────────────────────────────────────
 # Technician helpers
-# ─────────────────────────────────────────
 
-# ─────────────────────────────────────────
 # GitHub-backed persistence for technicians.json
 #
 # Streamlit Cloud containers have EPHEMERAL local disk: every sleep/wake or
@@ -84,7 +81,6 @@ def _get_pdf_page_size(path):
 # Personal Access Token with "Contents: Read and write" on this repo).
 # If the secret is missing, the app silently falls back to local-disk-only
 # storage (previous behavior) so nothing breaks without it configured.
-# ─────────────────────────────────────────
 GITHUB_REPO = "kellyjwinkle/backflow_app"
 GITHUB_BRANCH = "main"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{TECHNICIANS_FILE}"
@@ -105,8 +101,6 @@ def _github_headers():
 
 
 def _github_fetch_technicians():
-    """Pull the latest technicians.json from GitHub. Returns (data, sha) or
-    (None, None) if unavailable (no token, network error, file not found)."""
     headers = _github_headers()
     if not headers:
         return None, None
@@ -122,10 +116,9 @@ def _github_fetch_technicians():
 
 
 def _github_push_technicians(data: dict):
-    """Push the current technicians dict to GitHub. Returns (ok, message)."""
     headers = _github_headers()
     if not headers:
-        return False, "GITHUB_TOKEN not configured — saved locally only (won't survive a redeploy)."
+        return False, "GITHUB_TOKEN not configured -- saved locally only (won't survive a redeploy)."
     try:
         sha = st.session_state.get("_technicians_github_sha")
         if not sha:
@@ -208,10 +201,6 @@ def delete_technician_profile(name: str):
         return True, f"Profile deleted locally, but {gh_msg}"
     return False, local_msg
 
-
-# ─────────────────────────────────────────
-# In-session job store (PDFs in memory / direct device download)
-# ─────────────────────────────────────────
 
 def _jobs_store():
     if "_session_jobs" not in st.session_state:
@@ -379,8 +368,11 @@ JAX_CHECKBOXES = {
     "COMM_FIRE_BYPASS": (215, 510), "RECLAIM_YES": (421, 511), "RECLAIM_NO": (459, 510), "RES_ANNUAL": (210, 489),
     "RES_REPAIR": (280, 488), "RES_REPLACEMENT": (358, 489), "RES_NEW_INSTALL": (462, 489), "RES_POTABLE": (202, 466),
     "RES_IRRIGATION": (255, 465), "RES_RECLAIM_YES": (434, 466), "RES_RECLAIM_NO": (472, 464), "INIT_CV1_CLOSED": (139, 363),
-    "INIT_CV2_CLOSED": (235, 362), "INIT_RV_OPENED": (331, 356), "INIT_RV_DIDNOT": (336, 329), "INIT_PVB_AIOPEN": (445, 359),
+    "INIT_CV2_CLOSED": (235, 362),
+    "INIT_CV1_LEAKED": (139, 348), "INIT_CV2_LEAKED": (235, 347),
+    "INIT_RV_OPENED": (331, 356), "INIT_RV_DIDNOT": (336, 329), "INIT_PVB_AIOPEN": (445, 359),
     "INIT_PVB_AIDNOT": (451, 323), "FINAL_CV1_CLOSED": (138, 306), "FINAL_CV2_CLOSED": (236, 301),
+    "FINAL_CV1_LEAKED": (138, 291), "FINAL_CV2_LEAKED": (236, 286),
     "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
 }
 
@@ -642,8 +634,10 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     elif res_rc == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
     icv1 = form_data.get("init_cv1_result", "")
     if icv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
+    elif icv1 == "Leaked": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_LEAKED"])
     icv2 = form_data.get("init_cv2_result", "")
     if icv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
+    elif icv2 == "Leaked": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_LEAKED"])
     irv = form_data.get("init_rv_result", "")
     if irv == "Opened": draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
@@ -652,8 +646,10 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     elif ipvb == "Air Inlet Did Not": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
     fcv1 = form_data.get("final_cv1_result", "")
     if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
+    elif fcv1 == "Leaked": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_LEAKED"])
     fcv2 = form_data.get("final_cv2_result", "")
     if fcv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_CLOSED"])
+    elif fcv2 == "Leaked": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_LEAKED"])
     frv = form_data.get("final_rv_result", "")
     if frv == "Opened": draw_x(c, *JAX_CHECKBOXES["FINAL_RV_OPENED"])
     fpvb = form_data.get("final_pvb_result", "")
