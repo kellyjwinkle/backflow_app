@@ -6,21 +6,6 @@ Drop this file next to app.py in the backflow_app repo.
 Adds a "Batch Generate" mode: the inspector fills one spreadsheet
 (matching your Backflow-template.xlsx headers, one tab per template)
 and the app produces ALL the PDFs at once, zipped for download.
-
-Field keys below were pulled directly from app.py's UNITED_TEXT_FIELDS,
-JAX_TEXT_FIELDS, UNITED_CHECKBOXES and JAX_CHECKBOXES dicts, and from
-generate_united_pdf() / generate_jax_pdf() -- so this maps 1:1 onto your
-existing PDF-drawing logic. No PDF drawing code is duplicated here.
-
-INTEGRATION (in app.py):
-    from batch_generate import render_batch_tab
-
-    tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
-        ["United Fire", "Jacksonville", "Jobs", "Batch Generate"]
-    )
-    ...
-    with tab_batch:
-        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
 """
 
 import io
@@ -31,82 +16,42 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-# ---------------------------------------------------------------------------
-# JACKSONVILLE (JAX) column -> internal key map
-# Matches JAX_TEXT_FIELDS / JAX_CHECKBOXES in app.py exactly.
-# ---------------------------------------------------------------------------
 JAX_COLUMN_MAP = {
-    "premise name": "premises_name",
-    "owner name": "owner_name",
-    "service address": "service_address",
-    "mailing address": "mailing_address",
-    "jea account #": "jea_account",
-    "contact phone": "contact_phone",
-    "meter number": "meter_number",
-    "device type": "device_type",
-    "serial number": "serial_number",
-    "install date": "install_date",
-    "physical location": "physical_location",
-    "manufacturer": "manufacturer",
-    "model number": "model_number",
-    "size": "size",
-    "cv1": "init_cv1_result",
-    "cv1 psi": "init_cv1_psi",
-    "cv2": "init_cv2_result",
-    "cv2 psi": "init_cv2_psi",
-    "init rv": "init_rv_result",
-    "init psi": "init_rv_psi",
-    "init pvb": "init_pvb_result",
-    "init pvb psi": "init_pvb_psi",
-    "assembly results": "assembly_result",
-    "signature": "final_tester_name",
-    "date": "signature_date",
-    "signature date": "signature_date",
+    "premise name": "premises_name", "owner name": "owner_name", "service address": "service_address",
+    "mailing address": "mailing_address", "jea account #": "jea_account", "contact phone": "contact_phone",
+    "meter number": "meter_number", "device type": "device_type", "serial number": "serial_number",
+    "install date": "install_date", "physical location": "physical_location", "manufacturer": "manufacturer",
+    "model number": "model_number", "size": "size", "cv1": "init_cv1_result", "cv1 psi": "init_cv1_psi",
+    "cv2": "init_cv2_result", "cv2 psi": "init_cv2_psi", "init rv": "init_rv_result", "init psi": "init_rv_psi",
+    "init pvb": "init_pvb_result", "init pvb psi": "init_pvb_psi", "assembly results": "assembly_result",
+    "signature": "final_tester_name", "date": "signature_date", "signature date": "signature_date",
 }
-# Ordered pair for the duplicated "Test purpose / Service type / Reclaim /
-# Fire service bypass" column blocks -- first occurrence = Commercial,
-# second occurrence = Residential.
 JAX_DUPLICATE_BLOCKS = [
     ("test purpose", ["comm_test_purpose", "res_test_purpose"]),
     ("service type", ["comm_service_type", "res_service_type"]),
     ("reclaim", ["comm_reclaim", "res_reclaim"]),
-    ("fire service bypass", ["comm_fire_bypass", None]),  # no res equivalent field
+    ("fire service bypass", ["comm_fire_bypass", None]),
 ]
-
-# ---------------------------------------------------------------------------
-# UNITED (backflow_template.pdf) column -> internal key map
-# Matches UNITED_TEXT_FIELDS / UNITED_CHECKBOXES in app.py exactly.
-# ---------------------------------------------------------------------------
 UNITED_COLUMN_MAP = {
-    "customer name": "customer_name",
-    "street address": "street_address",
-    "branch": "branch",
-    "ahj": "ahj",
-    "manufacturer": "manufacturer",
-    "model": "model",
-    "size": "size",
-    "test date": "date",
-    "serial number": "serial_number",
-    "location/building": "location",
-    "assembly type": "assembly_type",
-    "system service": "system_service",
-    "bypass": "bypass",
-    "cv1 result": "cv1_result",
-    "cv1 differential pressure": "cv1_dp",
-    "cv2 result": "cv2_result",
-    "cv2 differential pressure": "cv2_dp",
-    "rv result": "rv_result",
-    "rv opened at psi": "rv_psi",
-    "rv outlet": "rv_out_result",
-    "rv inlet": "rv_in_result",
-    "air inlet result": "pvb_ai_result",
-    "air inlet psi": "pvb_ai_psi",
-    "cv result": "pvb_cv_result",
-    "cv psi": "pvb_cv_psi",
-    "assembly result": "assembly_result",
+    "customer name": "customer_name", "street address": "street_address", "branch": "branch", "ahj": "ahj",
+    "manufacturer": "manufacturer", "model": "model", "size": "size", "test date": "date",
+    "serial number": "serial_number", "location/building": "location", "assembly type": "assembly_type",
+    "system service": "system_service", "bypass": "bypass", "cv1 result": "cv1_result",
+    "cv1 differential pressure": "cv1_dp", "cv2 result": "cv2_result", "cv2 differential pressure": "cv2_dp",
+    "rv result": "rv_result", "rv opened at psi": "rv_psi", "rv outlet": "rv_out_result",
+    "rv inlet": "rv_in_result", "air inlet result": "pvb_ai_result", "air inlet psi": "pvb_ai_psi",
+    "cv result": "pvb_cv_result", "cv psi": "pvb_cv_psi", "assembly result": "assembly_result",
 }
-
 BOOL_KEYS = {"comm_fire_bypass"}
+
+CANONICAL_ENUMS = {
+    "closed tight": "Closed Tight", "leaked": "Leaked", "opened": "Opened", "did not open": "Did Not Open",
+    "held": "Held", "passed": "PASSED", "failed": "FAILED", "yes": "Yes", "no": "No", "annual": "Annual",
+    "repair": "Repair", "replacement": "Replacement", "new install": "New Install", "fire": "Fire",
+    "irrigation": "Irrigation", "process": "Process", "potable": "Potable", "domestic": "Domestic",
+    "attraction": "Attraction", "air inlet opened": "Air Inlet Opened", "air inlet did not": "Air Inlet Did Not",
+    "satisfactory": "Satisfactory",
+}
 
 
 def _normalize(col: str) -> str:
@@ -114,16 +59,14 @@ def _normalize(col: str) -> str:
 
 
 def _strip_dedupe_suffix(key: str) -> str:
-    """pandas auto-renames duplicate column headers to 'name', 'name.1',
-    'name.2', ... on read. Strip that suffix so duplicate-block matching
-    still works."""
     return re.sub(r"\.\d+$", "", key)
 
 
+def _canonicalize_value(val: str) -> str:
+    return CANONICAL_ENUMS.get(val.strip().lower(), val.strip())
+
+
 def _resolve_duplicate_columns(columns: list) -> dict:
-    """Handle the JAX sheet's repeated headers (Test purpose, Service type,
-    Reclaim, Fire service bypass appear twice: commercial then residential).
-    Returns {column_position_index: internal_key}."""
     seen = {}
     resolved = {}
     for idx, col in enumerate(columns):
@@ -156,7 +99,7 @@ def row_to_form_data(row, columns: list, fmt: str) -> dict:
         if mapped_key in BOOL_KEYS:
             val = str(val).strip().lower() in ("yes", "true", "1", "x", "y")
         else:
-            val = str(val).strip()
+            val = _canonicalize_value(str(val))
         form_data[mapped_key] = val
 
     if fmt == "jax" and "signature_date" in form_data:
@@ -183,7 +126,6 @@ def detect_format(sheet_name: str, headers: list) -> str:
 def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
     generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
     columns = list(df.columns)
-
     name_col = "premise name" if fmt == "jax" else "customer name"
     serial_col = "serial number"
 
@@ -221,9 +163,6 @@ def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
 
 
 def _build_blank_template() -> bytes:
-    """In-memory blank .xlsx with the exact header rows the two column
-    maps above expect -- Jacksonville and United, headers on row 1,
-    no sample data. Must stay in sync with header=0 read below."""
     import openpyxl
     from openpyxl.styles import Font, PatternFill
 
@@ -265,7 +204,6 @@ def _build_blank_template() -> bytes:
 
 
 def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None):
-    """Streamlit UI: call this inside a tab in app.py's main()."""
     st.subheader("Batch Generate Reports")
     st.caption(
         "Upload a spreadsheet matching your Backflow-template.xlsx layout. "
@@ -274,7 +212,7 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
     )
 
     st.download_button(
-        "\u2b07\ufe0f Download Blank Template",
+        "⬇️ Download Blank Template",
         data=_build_blank_template(),
         file_name="Backflow_Batch_Template.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -285,10 +223,6 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
     if not uploaded:
         return
 
-    # NOTE: header=0 -- headers live on row 1 of each sheet (matches the
-    # blank template above). Previously this was header=1, which silently
-    # skipped the real header row and treated the first data row as
-    # headers, causing every row to map to nothing and 0 PDFs to generate.
     sheets = pd.read_excel(uploaded, sheet_name=None, header=0)
     sheet_name = st.selectbox("Sheet to process", list(sheets.keys()), key="batch_sheet_select")
     df = sheets[sheet_name].dropna(how="all")
