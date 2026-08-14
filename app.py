@@ -8,6 +8,7 @@ from pypdf import PdfReader, PdfWriter
 from PIL import Image
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
+from batch_generate import render_batch_tab
 
 TEMPLATE_UNITED = "backflow_template.pdf"
 TEMPLATE_JAX = "jacksonville_template.pdf"
@@ -1302,14 +1303,20 @@ def main():
         global JAX_PAGE_W, JAX_PAGE_H
         JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
 
-    render_technician_sidebar()
-    tab_united, tab_jax, tab_jobs = st.tabs(["\U0001f535 United Fire", "\U0001f7e0 Jacksonville", "\U0001f4c1 Jobs"])
+            render_technician_sidebar()
+    tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
+        ["🔵 United Fire", "🟠 Jacksonville", "📁 Jobs", "📊 Batch Generate"]
+    )
     with tab_united:
         render_united_form()
     with tab_jax:
         render_jax_form()
     with tab_jobs:
         render_jobs_tab()
+    with tab_batch:
+        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
+
+
 
 
 if __name__ == "__main__":
