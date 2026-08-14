@@ -241,6 +241,7 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
     st.write(f"Detected **{len(df)}** report rows. Using **{fmt.upper()}** template.")
     st.dataframe(df.head(10).astype(str))
 
+
     save_to_jobs = False
     if add_job_to_session:
         save_to_jobs = st.checkbox("Also add each report to today's Jobs tab", value=True)
