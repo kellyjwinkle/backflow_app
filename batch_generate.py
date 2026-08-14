@@ -6,71 +6,119 @@ Drop this file next to app.py in the backflow_app repo.
 Adds a "Batch Generate" mode: the inspector fills one spreadsheet
 (matching your Backflow-template.xlsx headers, one tab per template)
 and the app produces ALL the PDFs at once, zipped for download.
+
+Field keys below were pulled directly from app.py's UNITED_TEXT_FIELDS,
+JAX_TEXT_FIELDS, UNITED_CHECKBOXES and JAX_CHECKBOXES dicts, and from
+generate_united_pdf() / generate_jax_pdf() -- so this maps 1:1 onto your
+existing PDF-drawing logic. No PDF drawing code is duplicated here.
+
+INTEGRATION (in app.py):
+    from batch_generate import render_batch_tab
+
+    tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
+        ["United Fire", "Jacksonville", "Jobs", "Batch Generate"]
+    )
+    ...
+    with tab_batch:
+        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
 """
 
 import io
-import re
 import zipfile
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
+# ---------------------------------------------------------------------------
+# JACKSONVILLE (JAX) column -> internal key map
+# Matches JAX_TEXT_FIELDS / JAX_CHECKBOXES in app.py exactly.
+# ---------------------------------------------------------------------------
 JAX_COLUMN_MAP = {
-    "premise name": "premises_name", "owner name": "owner_name", "service address": "service_address",
-    "mailing address": "mailing_address", "jea account #": "jea_account", "contact phone": "contact_phone",
-    "meter number": "meter_number", "device type": "device_type", "serial number": "serial_number",
-    "install date": "install_date", "physical location": "physical_location", "manufacturer": "manufacturer",
-    "model number": "model_number", "size": "size", "cv1": "init_cv1_result", "cv1 psi": "init_cv1_psi",
-    "cv2": "init_cv2_result", "cv2 psi": "init_cv2_psi", "init rv": "init_rv_result", "init psi": "init_rv_psi",
-    "init pvb": "init_pvb_result", "init pvb psi": "init_pvb_psi", "assembly results": "assembly_result",
-    "signature": "final_tester_name", "date": "signature_date", "signature date": "signature_date",
+    "premise name": "premises_name",
+    "owner name": "owner_name",
+    "service address": "service_address",
+    "mailing address": "mailing_address",
+    "jea account #": "jea_account",
+    "contact phone": "contact_phone",
+    "meter number": "meter_number",
+    "device type": "device_type",
+    "serial number": "serial_number",
+    "install date": "install_date",
+    "physical location": "physical_location",
+    "manufacturer": "manufacturer",
+    "model number": "model_number",
+    "size": "size",
+    "cv1": "init_cv1_result",
+    "cv1 psi": "init_cv1_psi",
+    "cv2": "init_cv2_result",
+    "cv2 psi": "init_cv2_psi",
+    "init rv": "init_rv_result",
+    "init psi": "init_rv_psi",
+    "init pvb": "init_pvb_result",
+    "init pvb psi": "init_pvb_psi",
+    "assembly results": "assembly_result",
+    "signature": "final_tester_name",
+    "date": "signature_date",
 }
+# Ordered pair for the duplicated "Test purpose / Service type / Reclaim /
+# Fire service bypass" column blocks -- first occurrence = Commercial,
+# second occurrence = Residential.
 JAX_DUPLICATE_BLOCKS = [
     ("test purpose", ["comm_test_purpose", "res_test_purpose"]),
     ("service type", ["comm_service_type", "res_service_type"]),
     ("reclaim", ["comm_reclaim", "res_reclaim"]),
-    ("fire service bypass", ["comm_fire_bypass", None]),
+    ("fire service bypass", ["comm_fire_bypass", None]),  # no res equivalent field
 ]
-UNITED_COLUMN_MAP = {
-    "customer name": "customer_name", "street address": "street_address", "branch": "branch", "ahj": "ahj",
-    "manufacturer": "manufacturer", "model": "model", "size": "size", "test date": "date",
-    "serial number": "serial_number", "location/building": "location", "assembly type": "assembly_type",
-    "system service": "system_service", "bypass": "bypass", "cv1 result": "cv1_result",
-    "cv1 differential pressure": "cv1_dp", "cv2 result": "cv2_result", "cv2 differential pressure": "cv2_dp",
-    "rv result": "rv_result", "rv opened at psi": "rv_psi", "rv outlet": "rv_out_result",
-    "rv inlet": "rv_in_result", "air inlet result": "pvb_ai_result", "air inlet psi": "pvb_ai_psi",
-    "cv result": "pvb_cv_result", "cv psi": "pvb_cv_psi", "assembly result": "assembly_result",
-}
-BOOL_KEYS = {"comm_fire_bypass"}
 
-CANONICAL_ENUMS = {
-    "closed tight": "Closed Tight", "leaked": "Leaked", "opened": "Opened", "did not open": "Did Not Open",
-    "held": "Held", "passed": "PASSED", "failed": "FAILED", "yes": "Yes", "no": "No", "annual": "Annual",
-    "repair": "Repair", "replacement": "Replacement", "new install": "New Install", "fire": "Fire",
-    "irrigation": "Irrigation", "process": "Process", "potable": "Potable", "domestic": "Domestic",
-    "attraction": "Attraction", "air inlet opened": "Air Inlet Opened", "air inlet did not": "Air Inlet Did Not",
-    "satisfactory": "Satisfactory",
+# ---------------------------------------------------------------------------
+# UNITED (backflow_template.pdf) column -> internal key map
+# Matches UNITED_TEXT_FIELDS / UNITED_CHECKBOXES in app.py exactly.
+# ---------------------------------------------------------------------------
+UNITED_COLUMN_MAP = {
+    "customer name": "customer_name",
+    "street address": "street_address",
+    "branch": "branch",
+    "ahj": "ahj",
+    "manufacturer": "manufacturer",
+    "model": "model",
+    "size": "size",
+    "test date": "date",
+    "serial number": "serial_number",
+    "location/building": "location",
+    "assembly type": "assembly_type",
+    "system service": "system_service",
+    "bypass": "bypass",
+    "cv1 result": "cv1_result",
+    "cv1 differential pressure": "cv1_dp",
+    "cv2 result": "cv2_result",
+    "cv2 differential pressure": "cv2_dp",
+    "rv result": "rv_result",
+    "rv opened at psi": "rv_psi",
+    "rv outlet": "rv_out_result",
+    "rv inlet": "rv_in_result",
+    "air inlet result": "pvb_ai_result",
+    "air inlet psi": "pvb_ai_psi",
+    "cv result": "pvb_cv_result",
+    "cv psi": "pvb_cv_psi",
+    "assembly result": "assembly_result",
 }
+
+BOOL_KEYS = {"comm_fire_bypass"}
 
 
 def _normalize(col: str) -> str:
     return str(col).strip().lower()
 
 
-def _strip_dedupe_suffix(key: str) -> str:
-    return re.sub(r"\.\d+$", "", key)
-
-
-def _canonicalize_value(val: str) -> str:
-    return CANONICAL_ENUMS.get(val.strip().lower(), val.strip())
-
-
 def _resolve_duplicate_columns(columns: list) -> dict:
+    """Handle the JAX sheet's repeated headers (Test purpose, Service type,
+    Reclaim, Fire service bypass appear twice: commercial then residential).
+    Returns {column_position_index: internal_key}."""
     seen = {}
     resolved = {}
     for idx, col in enumerate(columns):
-        key = _strip_dedupe_suffix(_normalize(col))
+        key = _normalize(col)
         for base, targets in JAX_DUPLICATE_BLOCKS:
             if key == base:
                 n = seen.get(base, 0)
@@ -93,13 +141,13 @@ def row_to_form_data(row, columns: list, fmt: str) -> dict:
         if idx in dup_resolved:
             mapped_key = dup_resolved[idx]
         else:
-            mapped_key = col_map.get(key) or col_map.get(_strip_dedupe_suffix(key))
+            mapped_key = col_map.get(key)
         if not mapped_key:
             continue
         if mapped_key in BOOL_KEYS:
             val = str(val).strip().lower() in ("yes", "true", "1", "x", "y")
         else:
-            val = _canonicalize_value(str(val))
+            val = str(val).strip()
         form_data[mapped_key] = val
 
     if fmt == "jax" and "signature_date" in form_data:
@@ -126,6 +174,7 @@ def detect_format(sheet_name: str, headers: list) -> str:
 def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
     generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
     columns = list(df.columns)
+
     name_col = "premise name" if fmt == "jax" else "customer name"
     serial_col = "serial number"
 
@@ -162,48 +211,8 @@ def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
     return buf.getvalue(), count, errors
 
 
-def _build_blank_template() -> bytes:
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill
-
-    jax_headers = [
-        "Premise name", "Owner name", "Service address", "Mailing address", "JEA Account #",
-        "Contact phone", "Meter number", "Test purpose", "Service type", "Reclaim",
-        "Fire service bypass", "Test purpose", "Service type", "Reclaim", "Fire service bypass",
-        "Device type", "Serial number", "Install date", "Physical location", "Manufacturer",
-        "Model number", "Size", "Cv1", "Cv1 PSI", "CV2", "CV2 PSI", "INIT RV", "INIT PSI",
-        "INIT PVB", "INIT PVB PSI", "ASSEMBLY RESULTS", "SIGNATURE DATE",
-    ]
-    united_headers = [
-        "CUSTOMER NAME", "STREET ADDRESS", "BRANCH", "AHJ", "MANUFACTURER", "MODEL", "SIZE",
-        "TEST DATE", "SERIAL NUMBER", "LOCATION/BUILDING", "ASSEMBLY TYPE", "SYSTEM SERVICE",
-        "BYPASS", "CV1 RESULT", "CV1 DIFFERENTIAL PRESSURE", "CV2 RESULT", "CV2 DIFFERENTIAL PRESSURE",
-        "RV RESULT", "RV OPENED AT PSI", "RV OUTLET", "RV INLET", "AIR INLET RESULT", "AIR INLET PSI",
-        "CV RESULT", "CV PSI", "ASSEMBLY RESULT",
-    ]
-
-    def _write(ws, headers):
-        fill = PatternFill("solid", fgColor="1F4E79")
-        font = Font(color="FFFFFF", bold=True)
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.fill = fill
-            cell.font = font
-            ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = 20
-
-    wb = openpyxl.Workbook()
-    ws1 = wb.active
-    ws1.title = "Jacksonville"
-    _write(ws1, jax_headers)
-    ws2 = wb.create_sheet("United")
-    _write(ws2, united_headers)
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
 def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None):
+    """Streamlit UI: call this inside a tab in app.py's main()."""
     st.subheader("Batch Generate Reports")
     st.caption(
         "Upload a spreadsheet matching your Backflow-template.xlsx layout. "
@@ -211,19 +220,11 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
         "Every row becomes one PDF."
     )
 
-    st.download_button(
-        "⬇️ Download Blank Template",
-        data=_build_blank_template(),
-        file_name="Backflow_Batch_Template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dl_batch_template",
-    )
-
     uploaded = st.file_uploader("Spreadsheet (.xlsx)", type=["xlsx"], key="batch_upload")
     if not uploaded:
         return
 
-    sheets = pd.read_excel(uploaded, sheet_name=None, header=0)
+    sheets = pd.read_excel(uploaded, sheet_name=None, header=1)
     sheet_name = st.selectbox("Sheet to process", list(sheets.keys()), key="batch_sheet_select")
     df = sheets[sheet_name].dropna(how="all")
 
@@ -238,7 +239,7 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
         fmt = "united"
 
     st.write(f"Detected **{len(df)}** report rows. Using **{fmt.upper()}** template.")
-    st.dataframe(df.head(10))
+    st.dataframe(df.head(10).astype(str))
 
     save_to_jobs = False
     if add_job_to_session:
@@ -261,11 +262,6 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
                         pass
 
         st.success(f"Generated {count} of {len(df)} reports.")
-        if count == 0:
-            st.error(
-                "No rows matched. Make sure the sheet's header row (row 1) uses the exact "
-                "column names from the 'Download Blank Template' button above."
-            )
         if errors:
             st.warning("Some rows failed:\n" + "\n".join(errors))
 
