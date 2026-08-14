@@ -224,7 +224,7 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
     if not uploaded:
         return
 
-    sheets = pd.read_excel(uploaded, sheet_name=None, header=1)
+    sheets = pd.read_excel(uploaded, sheet_name=None, header=0)
     sheet_name = st.selectbox("Sheet to process", list(sheets.keys()), key="batch_sheet_select")
     df = sheets[sheet_name].dropna(how="all")
 
