@@ -1303,7 +1303,7 @@ def main():
         global JAX_PAGE_W, JAX_PAGE_H
         JAX_PAGE_W, JAX_PAGE_H = _get_pdf_page_size(TEMPLATE_JAX)
 
-            render_technician_sidebar()
+    render_technician_sidebar()
     tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
         ["🔵 United Fire", "🟠 Jacksonville", "📁 Jobs", "📊 Batch Generate"]
     )
