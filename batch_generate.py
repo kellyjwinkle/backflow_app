@@ -60,7 +60,7 @@ JAX_COLUMN_MAP = {
     "assembly results": "assembly_result",
     "signature": "final_tester_name",
     "date": "signature_date",
-}
+
 # Ordered pair for the duplicated "Test purpose / Service type / Reclaim /
 # Fire service bypass" column blocks -- first occurrence = Commercial,
 # second occurrence = Residential.
@@ -170,8 +170,26 @@ def detect_format(sheet_name: str, headers: list) -> str:
         return "jax"
     return "united"
 
+def _apply_tester_profile(form_data: dict, fmt: str, tester_profile: dict):
+    if not tester_profile:
+        return
+    if fmt == "jax":
+        form_data.setdefault("init_tester_name", tester_profile.get("technician", ""))
+        form_data.setdefault("init_company", tester_profile.get("company", ""))
+        form_data.setdefault("init_cert", tester_profile.get("cert_no", ""))
+        form_data.setdefault("final_tester_name", tester_profile.get("technician", ""))
+        form_data.setdefault("final_company", tester_profile.get("company", ""))
+        form_data.setdefault("final_cert", tester_profile.get("cert_no", ""))
+    else:
+        form_data.setdefault("technician", tester_profile.get("technician", ""))
+        form_data.setdefault("gauge_mfg", tester_profile.get("gauge_mfg", ""))
+        form_data.setdefault("gauge_serial", tester_profile.get("gauge_serial", ""))
+        form_data.setdefault("date_cal", tester_profile.get("date_cal", ""))
+        form_data.setdefault("cert_no", tester_profile.get("cert_no", ""))
+        form_data.setdefault("recert", tester_profile.get("recert", ""))
+    form_data.setdefault("signature_b64", tester_profile.get("signature_b64", ""))
 
-def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
+def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profile=None):
     generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
     columns = list(df.columns)
 
@@ -185,7 +203,9 @@ def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf):
         for i, (_, row) in enumerate(df.iterrows(), start=1):
             form_data = row_to_form_data(row, columns, fmt)
             if not form_data:
-                continue
+                continue, add:            
+                _apply_tester_profile(form_data, fmt, tester_profile)
+
             try:
                 pdf_bytes = generator(form_data)
             except Exception as e:
