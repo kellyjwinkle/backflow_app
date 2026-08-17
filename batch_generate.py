@@ -58,8 +58,8 @@ JAX_COLUMN_MAP = {
     "init pvb": "init_pvb_result",
     "init pvb psi": "init_pvb_psi",
     "assembly results": "assembly_result",
-    "signature": "final_tester_name",
-    "date": "signature_date",
+    "signature date": "signature_date",
+}
 
 # Ordered pair for the duplicated "Test purpose / Service type / Reclaim /
 # Fire service bypass" column blocks -- first occurrence = Commercial,
