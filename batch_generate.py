@@ -20,7 +20,9 @@ INTEGRATION (in app.py):
     )
     ...
     with tab_batch:
-        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
+        _active_tech = st.session_state.get("_sidebar_tech_sel", "")
+        _tech_profile = get_technician_profile(_active_tech) if _active_tech else {}
+        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session, _tech_profile)
 """
 
 import io
@@ -170,6 +172,7 @@ def detect_format(sheet_name: str, headers: list) -> str:
         return "jax"
     return "united"
 
+
 def _apply_tester_profile(form_data: dict, fmt: str, tester_profile: dict):
     if not tester_profile:
         return
@@ -189,6 +192,7 @@ def _apply_tester_profile(form_data: dict, fmt: str, tester_profile: dict):
         form_data.setdefault("recert", tester_profile.get("recert", ""))
     form_data.setdefault("signature_b64", tester_profile.get("signature_b64", ""))
 
+
 def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profile=None):
     generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
     columns = list(df.columns)
@@ -203,8 +207,8 @@ def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profil
         for i, (_, row) in enumerate(df.iterrows(), start=1):
             form_data = row_to_form_data(row, columns, fmt)
             if not form_data:
-                continue, add:            
-                _apply_tester_profile(form_data, fmt, tester_profile)
+                continue
+            _apply_tester_profile(form_data, fmt, tester_profile)
 
             try:
                 pdf_bytes = generator(form_data)
@@ -231,7 +235,7 @@ def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profil
     return buf.getvalue(), count, errors
 
 
-def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None):
+def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
     """Streamlit UI: call this inside a tab in app.py's main()."""
     st.subheader("Batch Generate Reports")
     st.caption(
@@ -261,14 +265,13 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
     st.write(f"Detected **{len(df)}** report rows. Using **{fmt.upper()}** template.")
     st.dataframe(df.head(10).astype(str))
 
-
     save_to_jobs = False
     if add_job_to_session:
         save_to_jobs = st.checkbox("Also add each report to today's Jobs tab", value=True)
 
     if st.button("Generate all reports as ZIP", type="primary"):
         with st.spinner(f"Generating {len(df)} PDFs..."):
-            zip_bytes, count, errors = build_zip(df, fmt, generate_united_pdf, generate_jax_pdf)
+            zip_bytes, count, errors = build_zip(df, fmt, generate_united_pdf, generate_jax_pdf, tester_profile)
 
             if save_to_jobs and add_job_to_session:
                 columns = list(df.columns)
@@ -276,6 +279,7 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
                     fd = row_to_form_data(row, columns, fmt)
                     if not fd:
                         continue
+                    _apply_tester_profile(fd, fmt, tester_profile)
                     try:
                         pdf_bytes = (generate_jax_pdf if fmt == "jax" else generate_united_pdf)(fd)
                         add_job_to_session(fd, pdf_bytes, fmt)
