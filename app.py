@@ -20,6 +20,7 @@ UNITED_STICKY_FIELDS = [
     "customer_name", "street_address", "branch", "ahj",
     "manufacturer", "model", "size",
 ]
+
 JAX_STICKY_FIELDS = [
     "premises_name", "owner_name", "service_address", "mailing_address",
     "contact_phone", "jea_account", "meter_number",
@@ -34,6 +35,7 @@ UNITED_RESET_FIELDS = [
     "pvb_ai_result", "pvb_ai_psi", "pvb_cv_result", "pvb_cv_psi",
     "assembly_result", "repair_desc",
 ]
+
 JAX_RESET_FIELDS = [
     "device_type", "serial_number", "install_date", "physical_location",
     "comm_test_purpose", "comm_service_type", "comm_reclaim", "comm_fire_bypass",
@@ -49,12 +51,12 @@ UNITED_RESET_WIDGET_KEYS = [
     "u_sn", "u_loc",
     "u_cv1dp", "u_cv2dp", "u_rvpsi", "u_aipsi", "u_cvpsi", "u_rep",
 ]
+
 JAX_RESET_WIDGET_KEYS = [
     "j_dt", "j_sn", "j_id", "j_pl",
     "j_icv1p", "j_icv2p", "j_irvp", "j_ipvbp",
     "j_fcv1p", "j_fcv2p", "j_frvp", "j_rep",
 ]
-
 
 def _get_pdf_page_size(path):
     try:
@@ -65,10 +67,9 @@ def _get_pdf_page_size(path):
     except Exception:
         return 595, 842
 
-
-# ─────────────────────────────────────────────────────────────
-# Technician helpers — LOCAL ONLY (no GitHub writes)
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# Technician helpers - LOCAL ONLY (no GitHub writes)
+# -----------------------------------------------------------------
 
 def _init_technicians():
     if "technicians" not in st.session_state:
@@ -78,16 +79,13 @@ def _init_technicians():
         else:
             st.session_state["technicians"] = {}
 
-
 def get_technician_names():
     _init_technicians()
     return [""] + list(st.session_state["technicians"].keys())
 
-
 def get_technician_profile(name: str) -> dict:
     _init_technicians()
     return dict(st.session_state["technicians"].get(name, {}))
-
 
 def upsert_technician_profile(name: str, profile: dict):
     _init_technicians()
@@ -98,7 +96,6 @@ def upsert_technician_profile(name: str, profile: dict):
         return True, "Profile saved ✓"
     except Exception as e:
         return False, f"Save error: {e}"
-
 
 def delete_technician_profile(name: str):
     _init_technicians()
@@ -112,16 +109,14 @@ def delete_technician_profile(name: str):
     except Exception as e:
         return False, str(e)
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # In-session job store (PDFs in memory / direct device download)
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def _jobs_store():
     if "_session_jobs" not in st.session_state:
         st.session_state["_session_jobs"] = []
     return st.session_state["_session_jobs"]
-
 
 def add_job_to_session(form_data: dict, pdf_bytes: bytes, form_type: str):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S%f")
@@ -138,7 +133,7 @@ def add_job_to_session(form_data: dict, pdf_bytes: bytes, form_type: str):
     job_entry = {
         "filename": filename,
         "form_type": form_type,
-        "saved_at": datetime.now().strftime("%m/%d/%Y %H:%M"),
+        "saved_at": datetime.now().strftime("%m/%d/%Y"),
         "saved_date": datetime.now().strftime("%Y-%m-%d"),
         "technician": form_data.get("technician", ""),
         "date": form_data.get("date") or form_data.get("signature_date", ""),
@@ -152,7 +147,6 @@ def add_job_to_session(form_data: dict, pdf_bytes: bytes, form_type: str):
     }
     _jobs_store().append(job_entry)
     return filename
-
 
 def build_jobs_excel(jobs: list) -> bytes:
     wb = openpyxl.Workbook()
@@ -198,7 +192,6 @@ def build_jobs_excel(jobs: list) -> bytes:
     wb.save(buf)
     return buf.getvalue()
 
-
 def build_session_zip(selected_jobs: list, all_jobs: list) -> bytes:
     today_str = datetime.now().strftime("%Y-%m-%d")
     buf = BytesIO()
@@ -211,7 +204,6 @@ def build_session_zip(selected_jobs: list, all_jobs: list) -> bytes:
                 zf.writestr(job["filename"], pdf_bytes)
     buf.seek(0)
     return buf.getvalue()
-
 
 def reset_form_for_new_job(form_type: str):
     if form_type == "united":
@@ -236,10 +228,9 @@ def reset_form_for_new_job(form_type: str):
                   "j_final_rv_result", "j_final_pvb_result", "j_assembly_result"]:
             st.session_state.pop(k, None)
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # PDF field maps
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 UNITED_TEXT_FIELDS = {
     "date": (135, 583, 8), "branch": (235, 583, 8), "ahj": (437, 583, 8),
@@ -250,6 +241,7 @@ UNITED_TEXT_FIELDS = {
     "gauge_serial": (313, 178, 8), "date_cal": (455, 178, 8), "technician": (176, 155, 8),
     "cert_no": (407, 165, 8), "recert": (407, 150, 8),
 }
+
 UNITED_SIG_X, UNITED_SIG_Y, UNITED_SIG_W, UNITED_SIG_H = 170, 118, 130, 28
 UNITED_CHECKBOXES = {
     "RP": (210,460), "DC": (270,460), "PVB": (210,441), "SVB": (270,441), "FIRE": (395,490), "DOMESTIC": (395,475),
@@ -275,6 +267,7 @@ JAX_TEXT_FIELDS = {
     "final_tester_name": (93, 135, 9), "final_company": (239, 135, 9), "final_cert": (354, 136, 9),
     "final_test_date": (468, 139, 9), "signature_date": (433, 84, 9),
 }
+
 JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 161, 68, 160, 22
 JAX_CHECKBOXES = {
     "COMM_ANNUAL": (214, 545), "COMM_REPAIR": (286, 544), "COMM_REPLACEMENT": (358, 545), "COMM_NEW_INSTALL": (463, 545),
@@ -285,17 +278,20 @@ JAX_CHECKBOXES = {
     "INIT_CV2_CLOSED": (235, 362), "INIT_RV_OPENED": (331, 356), "INIT_RV_DIDNOT": (336, 329), "INIT_PVB_AIOPEN": (445, 359),
     "INIT_PVB_AIDNOT": (451, 323), "FINAL_CV1_CLOSED": (138, 306), "FINAL_CV2_CLOSED": (236, 301),
     "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
+    "INIT_CV1_LEAKED": (139, 348), "INIT_CV2_LEAKED": (235, 347), "FINAL_CV1_LEAKED": (138, 291), "FINAL_CV2_LEAKED": (236, 286),
 }
 
 UNITED_TESTER_DISPLAY_KEYS = [
     "u_gmfg_display", "u_gsn_display", "u_cal_display",
     "u_tech_display", "u_cert_display", "u_recert_display",
 ]
+
 JAX_TESTER_DISPLAY_KEYS = [
     "j_itn_display", "j_ico_display", "j_ic_display",
     "j_rb_display", "j_rco_display", "j_rc_display",
     "j_ftn_display", "j_fco_display", "j_fc_display",
 ]
+
 UNITED_TESTER_WIDGET_KEYS = ["u_gmfg", "u_gsn", "u_cal", "u_tech", "u_cert", "u_recert"]
 JAX_TESTER_WIDGET_KEYS = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_ftn", "j_fco", "j_fc"]
 TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
@@ -305,10 +301,9 @@ JAX_TESTER_MAP = {
     "final_tester_name": "technician", "final_company": "company", "final_cert": "cert_no",
 }
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Drawing helpers
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def draw_x(c, bx, by, size=3.8):
     c.setStrokeColorRGB(1, 0, 0)
@@ -316,13 +311,11 @@ def draw_x(c, bx, by, size=3.8):
     c.line(bx-size, by-size, bx+size, by+size)
     c.line(bx+size, by-size, bx-size, by+size)
 
-
 def put_text(c, val, x, y, sz=8):
     if val:
         c.setFont("Helvetica-Bold", sz)
         c.setFillColorRGB(1, 0, 0)
         c.drawString(x, y, str(val))
-
 
 def wrap_text(text, w=58):
     words = text.split()
@@ -338,20 +331,46 @@ def wrap_text(text, w=58):
         lines.append(line)
     return lines
 
+# -----------------------------------------------------------------
+# PSI -> Closed Tight / Leaked auto-result helper
+# -----------------------------------------------------------------
 
-# ─────────────────────────────────────────────────────────────
+def auto_cv_result_from_psi(psi_str):
+    """NFPA/ASSE convention: a held differential of >= 1.0 psi across a
+    check valve means it is Closed Tight; below 1.0 psi means it Leaked.
+    Returns None if the value can't be parsed (leaves field untouched)."""
+    if psi_str is None or str(psi_str).strip() == "":
+        return None
+    try:
+        val = float(str(psi_str).strip())
+    except (ValueError, TypeError):
+        return None
+    return "Closed Tight" if val >= 1.0 else "Leaked"
+
+def sync_cv_result_with_psi(form, dp_value, result_field, tracker_key):
+    """Auto-populates result_field in form based on dp_value, but only
+    re-applies when dp_value actually changed since last run, so a manual
+    override by the technician isn't stomped on every rerun."""
+    last = st.session_state.get(tracker_key)
+    if dp_value != last:
+        auto_result = auto_cv_result_from_psi(dp_value)
+        st.session_state[tracker_key] = dp_value
+        if auto_result:
+            form[result_field] = auto_result
+            return auto_result
+    return form.get(result_field, "")
+
+# -----------------------------------------------------------------
 # Form / session helpers
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def _init_form(key, defaults=None):
     if key not in st.session_state:
         st.session_state[key] = defaults or {}
 
-
 def _clear_widget_keys(keys):
     for key in keys:
         st.session_state.pop(key, None)
-
 
 def clearable_input(label, form_key, field_key, widget_key, **kwargs):
     form = st.session_state[form_key]
@@ -360,7 +379,6 @@ def clearable_input(label, form_key, field_key, widget_key, **kwargs):
     val = st.text_input(label, key=widget_key, **kwargs)
     form[field_key] = val
     return val
-
 
 def get_signature_image_reader(form_data=None):
     source_b64 = form_data.get("signature_b64") if form_data and form_data.get("signature_b64") else st.session_state.get("signature_b64")
@@ -373,10 +391,8 @@ def get_signature_image_reader(form_data=None):
             return None
     return None
 
-
 def clear_signature():
     st.session_state.pop("signature_b64", None)
-
 
 def save_signature(img_array):
     buf = BytesIO()
@@ -386,7 +402,6 @@ def save_signature(img_array):
     st.session_state["signature_b64"] = b64
     return b64
 
-
 def _date_to_string(value):
     if not value:
         return ""
@@ -395,7 +410,6 @@ def _date_to_string(value):
     if isinstance(value, date):
         return value.strftime("%m/%d/%Y")
     return str(value)
-
 
 def synced_date_input(label, form_key, source_key, widget_key, target_fields):
     form = st.session_state[form_key]
@@ -414,7 +428,6 @@ def synced_date_input(label, form_key, source_key, widget_key, target_fields):
     for field in target_fields:
         form[field] = picked_str
     return picked
-
 
 def apply_profile_to_forms(profile: dict):
     """Write a technician profile into both forms and clear stale widget keys.
@@ -443,7 +456,7 @@ def apply_profile_to_forms(profile: dict):
         united[tk] = profile.get(tk, "")
     united["signature_b64"] = profile.get("signature_b64", "")
 
-    # 4. Write into jax_form — map every JAX tester field from the profile
+    # 4. Write into jax_form - map every JAX tester field from the profile
     jax = st.session_state["jax_form"]
     for jk, pk in JAX_TESTER_MAP.items():
         jax[jk] = profile.get(pk, "")
@@ -458,10 +471,9 @@ def apply_profile_to_forms(profile: dict):
         + UNITED_TESTER_DISPLAY_KEYS + JAX_TESTER_DISPLAY_KEYS
     )
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # PDF generators
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def generate_united_pdf(form_data: dict) -> bytes:
     reader = PdfReader(TEMPLATE_UNITED)
@@ -528,7 +540,6 @@ def generate_united_pdf(form_data: dict) -> bytes:
     writer.write(out)
     return out.getvalue()
 
-
 def generate_jax_pdf(form_data: dict) -> bytes:
     # Use module-level JAX_PAGE_W/H which are set in main() from the template
     pw = globals().get("JAX_PAGE_W", 612)
@@ -568,8 +579,10 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     elif res_rc == "No": draw_x(c, *JAX_CHECKBOXES["RES_RECLAIM_NO"])
     icv1 = form_data.get("init_cv1_result", "")
     if icv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_CLOSED"])
+    elif icv1 == "Leaked": draw_x(c, *JAX_CHECKBOXES["INIT_CV1_LEAKED"])
     icv2 = form_data.get("init_cv2_result", "")
     if icv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_CLOSED"])
+    elif icv2 == "Leaked": draw_x(c, *JAX_CHECKBOXES["INIT_CV2_LEAKED"])
     irv = form_data.get("init_rv_result", "")
     if irv == "Opened": draw_x(c, *JAX_CHECKBOXES["INIT_RV_OPENED"])
     elif irv == "Did Not Open": draw_x(c, *JAX_CHECKBOXES["INIT_RV_DIDNOT"])
@@ -578,8 +591,10 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     elif ipvb == "Air Inlet Did Not": draw_x(c, *JAX_CHECKBOXES["INIT_PVB_AIDNOT"])
     fcv1 = form_data.get("final_cv1_result", "")
     if fcv1 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_CLOSED"])
+    elif fcv1 == "Leaked": draw_x(c, *JAX_CHECKBOXES["FINAL_CV1_LEAKED"])
     fcv2 = form_data.get("final_cv2_result", "")
     if fcv2 == "Closed Tight": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_CLOSED"])
+    elif fcv2 == "Leaked": draw_x(c, *JAX_CHECKBOXES["FINAL_CV2_LEAKED"])
     frv = form_data.get("final_rv_result", "")
     if frv == "Opened": draw_x(c, *JAX_CHECKBOXES["FINAL_RV_OPENED"])
     fpvb = form_data.get("final_pvb_result", "")
@@ -599,10 +614,9 @@ def generate_jax_pdf(form_data: dict) -> bytes:
     writer.write(out)
     return out.getvalue()
 
-
-# ─────────────────────────────────────────────────────────────
-# Sidebar — streamlined profile picker, edit collapsed
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# Sidebar - streamlined profile picker, edit collapsed
+# -----------------------------------------------------------------
 
 def render_technician_sidebar():
     st.sidebar.title("\U0001f464 Technician")
@@ -740,10 +754,9 @@ def render_technician_sidebar():
                     st.session_state[confirm_key] = False
                     st.rerun()
 
-
-# ─────────────────────────────────────────────────────────────
-# Tester info — compact collapsible banner
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# Tester info - compact collapsible banner
+# -----------------------------------------------------------------
 
 def render_tester_banner(form_key: str, form_type: str):
     _init_form(form_key)
@@ -798,7 +811,7 @@ def render_tester_banner(form_key: str, form_type: str):
                 v = st.text_input("Init Cert", value=form.get("init_cert", ""), key="j_ic_display")
                 form["init_cert"] = v
 
-            # Repair row — only shown when assembly result is FAILED
+            # Repair row - only shown when assembly result is FAILED
             assembly_result = form.get("assembly_result", "")
             if assembly_result == "FAILED":
                 st.markdown("**Repaired By**")
@@ -837,10 +850,9 @@ def render_tester_banner(form_key: str, form_type: str):
         else:
             st.caption("\u26a0\ufe0f No signature. Upload in sidebar.")
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # United Fire form
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def render_united_form():
     _init_form("united_form")
@@ -894,19 +906,25 @@ def render_united_form():
         col1, col2 = st.columns(2)
         ct_opts = ["", "Closed Tight", "Leaked"]
         with col1:
+            cv1dp = st.text_input("CV1 Differential Pressure", value=form.get("cv1_dp", ""), key="u_cv1dp")
+            form["cv1_dp"] = cv1dp
+            auto_cv1 = sync_cv_result_with_psi(form, cv1dp, "cv1_result", "_last_u_cv1dp")
+            if auto_cv1 and st.session_state.get("u_cv1_result") != auto_cv1:
+                st.session_state["u_cv1_result"] = auto_cv1
             cv1 = st.selectbox("CV1 Result", ct_opts,
                                index=ct_opts.index(form.get("cv1_result", "")) if form.get("cv1_result", "") in ct_opts else 0,
                                key="u_cv1_result")
             form["cv1_result"] = cv1
-            cv1dp = st.text_input("CV1 Differential Pressure", value=form.get("cv1_dp", ""), key="u_cv1dp")
-            form["cv1_dp"] = cv1dp
         with col2:
+            cv2dp = st.text_input("CV2 Differential Pressure", value=form.get("cv2_dp", ""), key="u_cv2dp")
+            form["cv2_dp"] = cv2dp
+            auto_cv2 = sync_cv_result_with_psi(form, cv2dp, "cv2_result", "_last_u_cv2dp")
+            if auto_cv2 and st.session_state.get("u_cv2_result") != auto_cv2:
+                st.session_state["u_cv2_result"] = auto_cv2
             cv2 = st.selectbox("CV2 Result", ct_opts,
                                index=ct_opts.index(form.get("cv2_result", "")) if form.get("cv2_result", "") in ct_opts else 0,
                                key="u_cv2_result")
             form["cv2_result"] = cv2
-            cv2dp = st.text_input("CV2 Differential Pressure", value=form.get("cv2_dp", ""), key="u_cv2dp")
-            form["cv2_dp"] = cv2dp
 
     if atype_val in ("", "RP"):
         st.markdown("*Relief Valve*")
@@ -998,10 +1016,9 @@ def render_united_form():
                 use_container_width=True,
             )
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Jacksonville form
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def render_jax_form():
     _init_form("jax_form")
@@ -1094,18 +1111,24 @@ def render_jax_form():
     rv_opts_j = ["", "Opened", "Did Not Open"]
     pvb_opts = ["", "Air Inlet Opened", "Air Inlet Did Not"]
     with col1:
+        icv1p = st.text_input("Init CV1 (psi)", value=form.get("init_cv1_psi", ""), key="j_icv1p")
+        form["init_cv1_psi"] = icv1p
+        auto_icv1 = sync_cv_result_with_psi(form, icv1p, "init_cv1_result", "_last_j_icv1p")
+        if auto_icv1 and st.session_state.get("j_init_cv1_result") != auto_icv1:
+            st.session_state["j_init_cv1_result"] = auto_icv1
         icv1 = st.selectbox("Init CV1", ct_opts,
                             index=ct_opts.index(form.get("init_cv1_result", "")) if form.get("init_cv1_result", "") in ct_opts else 0,
                             key="j_init_cv1_result")
         form["init_cv1_result"] = icv1
-        icv1p = st.text_input("Init CV1 (psi)", value=form.get("init_cv1_psi", ""), key="j_icv1p")
-        form["init_cv1_psi"] = icv1p
+        icv2p = st.text_input("Init CV2 (psi)", value=form.get("init_cv2_psi", ""), key="j_icv2p")
+        form["init_cv2_psi"] = icv2p
+        auto_icv2 = sync_cv_result_with_psi(form, icv2p, "init_cv2_result", "_last_j_icv2p")
+        if auto_icv2 and st.session_state.get("j_init_cv2_result") != auto_icv2:
+            st.session_state["j_init_cv2_result"] = auto_icv2
         icv2 = st.selectbox("Init CV2", ct_opts,
                             index=ct_opts.index(form.get("init_cv2_result", "")) if form.get("init_cv2_result", "") in ct_opts else 0,
                             key="j_init_cv2_result")
         form["init_cv2_result"] = icv2
-        icv2p = st.text_input("Init CV2 (psi)", value=form.get("init_cv2_psi", ""), key="j_icv2p")
-        form["init_cv2_psi"] = icv2p
     with col2:
         irv = st.selectbox("Init RV", rv_opts_j,
                            index=rv_opts_j.index(form.get("init_rv_result", "")) if form.get("init_rv_result", "") in rv_opts_j else 0,
@@ -1126,18 +1149,24 @@ def render_jax_form():
     frv_opts = ["", "Opened", "Did Not Open"]
     fpvb_opts = ["", "Satisfactory"]
     with col1:
+        fcv1p = st.text_input("Final CV1 (psi)", value=form.get("final_cv1_psi", ""), key="j_fcv1p")
+        form["final_cv1_psi"] = fcv1p
+        auto_fcv1 = sync_cv_result_with_psi(form, fcv1p, "final_cv1_result", "_last_j_fcv1p")
+        if auto_fcv1 and st.session_state.get("j_final_cv1_result") != auto_fcv1:
+            st.session_state["j_final_cv1_result"] = auto_fcv1
         fcv1 = st.selectbox("Final CV1", ct_opts,
                             index=ct_opts.index(form.get("final_cv1_result", "")) if form.get("final_cv1_result", "") in ct_opts else 0,
                             key="j_final_cv1_result")
         form["final_cv1_result"] = fcv1
-        fcv1p = st.text_input("Final CV1 (psi)", value=form.get("final_cv1_psi", ""), key="j_fcv1p")
-        form["final_cv1_psi"] = fcv1p
+        fcv2p = st.text_input("Final CV2 (psi)", value=form.get("final_cv2_psi", ""), key="j_fcv2p")
+        form["final_cv2_psi"] = fcv2p
+        auto_fcv2 = sync_cv_result_with_psi(form, fcv2p, "final_cv2_result", "_last_j_fcv2p")
+        if auto_fcv2 and st.session_state.get("j_final_cv2_result") != auto_fcv2:
+            st.session_state["j_final_cv2_result"] = auto_fcv2
         fcv2 = st.selectbox("Final CV2", ct_opts,
                             index=ct_opts.index(form.get("final_cv2_result", "")) if form.get("final_cv2_result", "") in ct_opts else 0,
                             key="j_final_cv2_result")
         form["final_cv2_result"] = fcv2
-        fcv2p = st.text_input("Final CV2 (psi)", value=form.get("final_cv2_psi", ""), key="j_fcv2p")
-        form["final_cv2_psi"] = fcv2p
     with col2:
         frv = st.selectbox("Final RV", frv_opts,
                            index=frv_opts.index(form.get("final_rv_result", "")) if form.get("final_rv_result", "") in frv_opts else 0,
@@ -1159,7 +1188,7 @@ def render_jax_form():
                           key="j_assembly_result")
         form["assembly_result"] = ar
     with col2:
-        # Repairs Made — only shown when FAILED
+        # Repairs Made - only shown when FAILED
         if form.get("assembly_result") == "FAILED":
             rep = st.text_input("Repairs Made", value=form.get("repairs", ""), key="j_rep")
             form["repairs"] = rep
@@ -1204,10 +1233,9 @@ def render_jax_form():
                 use_container_width=True,
             )
 
-
-# ─────────────────────────────────────────────────────────────
-# Jobs tab — session-based, ZIP + Excel export
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# Jobs tab - session-based, ZIP + Excel export
+# -----------------------------------------------------------------
 
 def render_jobs_tab():
     st.subheader("\U0001f4c1 Today's Jobs")
@@ -1224,7 +1252,7 @@ def render_jobs_tab():
     for job in all_jobs:
         fname = job.get("filename", "")
         result_icon = "\u2705" if job.get("assembly_result") == "PASSED" else ("\u274c" if job.get("assembly_result") == "FAILED" else "\u2b1c")
-        label = f"{result_icon}  {job.get('customer', '')} | {job.get('location', '')} | SN: {job.get('serial_number', '')} | {job.get('assembly_result', '')}"
+        label = f"{result_icon} {job.get('customer', '')} | {job.get('location', '')} | SN: {job.get('serial_number', '')} | {job.get('assembly_result', '')}"
         checked = st.checkbox(label, value=True, key=f"chk_{fname}")
         if checked:
             selected_filenames.append(fname)
@@ -1239,7 +1267,6 @@ def render_jobs_tab():
             )
         st.divider()
 
-    st.divider()
     selected_jobs = [j for j in all_jobs if j.get("filename") in selected_filenames]
     if selected_jobs:
         col_zip, col_excel = st.columns(2)
@@ -1286,10 +1313,9 @@ def render_jobs_tab():
                 st.session_state[confirm_clear] = False
                 st.rerun()
 
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # Main
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def main():
     st.set_page_config(
@@ -1305,8 +1331,9 @@ def main():
 
     render_technician_sidebar()
     tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
-        ["🔵 United Fire", "🟠 Jacksonville", "📁 Jobs", "📊 Batch Generate"]
+        ["\U0001f535 United Fire", "\U0001f7e0 Jacksonville", "\U0001f4c1 Jobs", "\U0001f4ca Batch Generate"]
     )
+
     with tab_united:
         render_united_form()
     with tab_jax:
@@ -1315,9 +1342,6 @@ def main():
         render_jobs_tab()
     with tab_batch:
         render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
-
-
-
 
 if __name__ == "__main__":
     main()
