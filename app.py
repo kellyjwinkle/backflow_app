@@ -335,30 +335,34 @@ def wrap_text(text, w=58):
 # PSI -> Closed Tight / Leaked auto-result helper
 # -----------------------------------------------------------------
 
-def auto_cv_result_from_psi(psi_str):
-    """NFPA/ASSE convention: a held differential of >= 1.0 psi across a
-    check valve means it is Closed Tight; below 1.0 psi means it Leaked.
-    Returns None if the value can't be parsed (leaves field untouched)."""
+def auto_result_from_psi(psi_str, good_label, bad_label=None, threshold=1.0):
+    """If bad_label is set: >= threshold -> good_label, else bad_label.
+    If bad_label is None: any numeric PSI -> good_label (Opened / Air Inlet Opened)."""
     if psi_str is None or str(psi_str).strip() == "":
         return None
     try:
         val = float(str(psi_str).strip())
     except (ValueError, TypeError):
         return None
-    return "Closed Tight" if val >= 1.0 else "Leaked"
+    if bad_label is None:
+        return good_label
+    return good_label if val >= threshold else bad_label
 
-def sync_cv_result_with_psi(form, dp_value, result_field, tracker_key):
-    """Auto-populates result_field in form based on dp_value, but only
-    re-applies when dp_value actually changed since last run, so a manual
-    override by the technician isn't stomped on every rerun."""
+def sync_result_with_psi(form, psi_value, result_field, tracker_key, good_label, bad_label=None, threshold=1.0):
     last = st.session_state.get(tracker_key)
-    if dp_value != last:
-        auto_result = auto_cv_result_from_psi(dp_value)
-        st.session_state[tracker_key] = dp_value
+    if psi_value != last:
+        auto_result = auto_result_from_psi(psi_value, good_label, bad_label, threshold)
+        st.session_state[tracker_key] = psi_value
         if auto_result:
             form[result_field] = auto_result
             return auto_result
     return form.get(result_field, "")
+
+def auto_cv_result_from_psi(psi_str):
+    return auto_result_from_psi(psi_str, "Closed Tight", "Leaked")
+
+def sync_cv_result_with_psi(form, dp_value, result_field, tracker_key):
+    return sync_result_with_psi(form, dp_value, result_field, tracker_key, "Closed Tight", "Leaked")
 
 # -----------------------------------------------------------------
 # Form / session helpers
