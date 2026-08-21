@@ -264,8 +264,7 @@ JAX_TEXT_FIELDS = {
     "repairs": (99, 244, 9), "init_tester_name": (94, 182, 9), "init_company": (236, 183, 9),
     "init_cert": (356, 183, 9), "init_test_date": (464, 183, 9), "repaired_by": (95, 158, 9),
     "repair_company": (239, 156, 9), "repair_cert": (355, 159, 9), "repair_date": (464, 162, 9),
-    "final_tester_name": (93, 135, 9), "final_company": (239, 135, 9), "final_cert": (354, 136, 9),
-    "final_test_date": (468, 139, 9), "signature_date": (433, 84, 9),
+    "signature_date": (433, 84, 9),
 }
 
 JAX_SIG_X, JAX_SIG_Y, JAX_SIG_W, JAX_SIG_H = 161, 68, 160, 22
@@ -277,8 +276,8 @@ JAX_CHECKBOXES = {
     "RES_IRRIGATION": (255, 465), "RES_RECLAIM_YES": (434, 466), "RES_RECLAIM_NO": (472, 464), "INIT_CV1_CLOSED": (139, 363),
     "INIT_CV2_CLOSED": (235, 362), "INIT_RV_OPENED": (331, 356), "INIT_RV_DIDNOT": (336, 329), "INIT_PVB_AIOPEN": (445, 359),
     "INIT_PVB_AIDNOT": (451, 323), "FINAL_CV1_CLOSED": (138, 306), "FINAL_CV2_CLOSED": (236, 301),
-    "FINAL_RV_OPENED": (331, 296), "FINAL_PVB_SAT": (450, 290), "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
-    "INIT_CV1_LEAKED": (139, 348), "INIT_CV2_LEAKED": (235, 347), "FINAL_CV1_LEAKED": (138, 291), "FINAL_CV2_LEAKED": (236, 286),
+    "JAX_PASSED": (300, 106), "JAX_FAILED": (358, 108),
+    "INIT_CV1_LEAKED": (139, 348), "INIT_CV2_LEAKED": (235, 347),
 }
 
 UNITED_TESTER_DISPLAY_KEYS = [
@@ -297,9 +296,7 @@ JAX_TESTER_WIDGET_KEYS = ["j_itn", "j_ico", "j_ic", "j_rb", "j_rco", "j_rc", "j_
 TESTER_KEYS = ["gauge_mfg", "gauge_serial", "date_cal", "technician", "cert_no", "recert"]
 JAX_TESTER_MAP = {
     "init_tester_name": "technician", "init_company": "company", "init_cert": "cert_no",
-    "repaired_by": "technician", "repair_company": "company", "repair_cert": "cert_no",
-    "final_tester_name": "technician", "final_company": "company", "final_cert": "cert_no",
-}
+   }
 
 # -----------------------------------------------------------------
 # Drawing helpers
