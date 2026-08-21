@@ -124,7 +124,8 @@ RESULT_NORMALIZE = {
 def _normalize_result(val) -> str:
     key = str(val).strip().lower()
     return RESULT_NORMALIZE.get(key, str(val).strip())
-    
+
+
 def _normalize(col: str) -> str:
     return str(col).strip().lower()
 
@@ -162,7 +163,7 @@ def row_to_form_data(row, columns: list, fmt: str) -> dict:
             mapped_key = col_map.get(key)
         if not mapped_key:
             continue
-               if isinstance(val, (pd.Timestamp, datetime)):
+        if isinstance(val, (pd.Timestamp, datetime)):
             val = val.strftime("%m/%d/%Y")
         elif mapped_key in BOOL_KEYS:
             val = str(val).strip().lower() in ("yes", "true", "1", "x", "y")
