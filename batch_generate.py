@@ -108,7 +108,23 @@ UNITED_COLUMN_MAP = {
 
 BOOL_KEYS = {"comm_fire_bypass"}
 
+RESULT_NORMALIZE = {
+    "closed tight": "Closed Tight",
+    "leaked": "Leaked",
+    "opened": "Opened",
+    "did not open": "Did Not Open",
+    "n/a": "N/A",
+    "air inlet opened": "Air Inlet Opened",
+    "air inlet did not": "Air Inlet Did Not",
+    "satisfactory": "Satisfactory",
+    "held": "Held",
+}
 
+
+def _normalize_result(val) -> str:
+    key = str(val).strip().lower()
+    return RESULT_NORMALIZE.get(key, str(val).strip())
+    
 def _normalize(col: str) -> str:
     return str(col).strip().lower()
 
@@ -146,8 +162,12 @@ def row_to_form_data(row, columns: list, fmt: str) -> dict:
             mapped_key = col_map.get(key)
         if not mapped_key:
             continue
-        if mapped_key in BOOL_KEYS:
+               if isinstance(val, (pd.Timestamp, datetime)):
+            val = val.strftime("%m/%d/%Y")
+        elif mapped_key in BOOL_KEYS:
             val = str(val).strip().lower() in ("yes", "true", "1", "x", "y")
+        elif mapped_key.endswith("_result") or mapped_key.endswith("_reclaim"):
+            val = _normalize_result(val)
         else:
             val = str(val).strip()
         form_data[mapped_key] = val
