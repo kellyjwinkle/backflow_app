@@ -7,12 +7,17 @@ Adds a "Batch Generate" mode: the inspector fills one spreadsheet
 (matching your Backflow-template.xlsx headers, one tab per template)
 and the app produces ALL the PDFs at once, zipped for download.
 
+Every populated sheet in the uploaded workbook is processed automatically
+in a single pass -- no sheet picker, no manual template confirmation.
+Multiple devices at the same address are handled per-row, so a single
+upload can mix device types/serials under one customer without issue.
+
 Field keys below were pulled directly from app.py's UNITED_TEXT_FIELDS,
 JAX_TEXT_FIELDS, UNITED_CHECKBOXES and JAX_CHECKBOXES dicts, and from
 generate_united_pdf() / generate_jax_pdf() -- so this maps 1:1 onto your
 existing PDF-drawing logic. No PDF drawing code is duplicated here.
 
-INTEGRATION (in app.py):
+INTEGRATION (in app.py) -- unchanged from before:
     from batch_generate import render_batch_tab
 
     tab_united, tab_jax, tab_jobs, tab_batch = st.tabs(
@@ -214,55 +219,86 @@ def _apply_tester_profile(form_data: dict, fmt: str, tester_profile: dict):
     form_data.setdefault("signature_b64", tester_profile.get("signature_b64", ""))
 
 
-def build_zip(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profile=None):
+def _process_sheet(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profile=None):
+    """Turn every row of one sheet into a generated PDF. Returns
+    (results, errors) where results is a list of
+    (filename, pdf_bytes, form_data, fmt) tuples."""
     generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
     columns = list(df.columns)
 
     name_col = "premise name" if fmt == "jax" else "customer name"
     serial_col = "serial number"
 
-    buf = io.BytesIO()
+    results = []
     errors = []
-    count = 0
+    for i, (_, row) in enumerate(df.iterrows(), start=1):
+        form_data = row_to_form_data(row, columns, fmt)
+        if not form_data:
+            continue
+        _apply_tester_profile(form_data, fmt, tester_profile)
+
+        try:
+            pdf_bytes = generator(form_data)
+        except Exception as e:
+            errors.append(f"{fmt.upper()} row {i}: {e}")
+            continue
+
+        label = "unknown"
+        for col, val in row.items():
+            if _normalize(col) == name_col and pd.notna(val):
+                label = str(val).strip().replace("/", "-")[:60]
+                break
+        serial = "NA"
+        for col, val in row.items():
+            if _normalize(col) == serial_col and pd.notna(val):
+                serial = str(val).strip()
+                break
+
+        filename = f"{fmt}_{label}_{serial}.pdf".replace(" ", "_")
+        results.append((filename, pdf_bytes, form_data, fmt))
+
+    return results, errors
+
+
+def build_zip_all(sheets: dict, generate_united_pdf, generate_jax_pdf, tester_profile=None):
+    """Process every non-empty sheet in the uploaded workbook and bundle
+    every generated PDF into a single ZIP. Returns (zip_bytes, results, errors)."""
+    buf = io.BytesIO()
+    all_results = []
+    all_errors = []
+    seen_names = {}
+
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for i, (_, row) in enumerate(df.iterrows(), start=1):
-            form_data = row_to_form_data(row, columns, fmt)
-            if not form_data:
+        for sheet_name, raw_df in sheets.items():
+            df = raw_df.dropna(how="all")
+            if df.empty:
                 continue
-            _apply_tester_profile(form_data, fmt, tester_profile)
-
-            try:
-                pdf_bytes = generator(form_data)
-            except Exception as e:
-                errors.append(f"Row {i}: {e}")
-                continue
-
-            label = "unknown"
-            for col, val in row.items():
-                if _normalize(col) == name_col and pd.notna(val):
-                    label = str(val).strip().replace("/", "-")[:60]
-                    break
-            serial = "NA"
-            for col, val in row.items():
-                if _normalize(col) == serial_col and pd.notna(val):
-                    serial = str(val).strip()
-                    break
-
-            filename = f"{label}_{serial}.pdf".replace(" ", "_")
-            zf.writestr(filename, pdf_bytes)
-            count += 1
+            fmt = detect_format(sheet_name, list(df.columns))
+            results, errors = _process_sheet(df, fmt, generate_united_pdf, generate_jax_pdf, tester_profile)
+            all_errors.extend(errors)
+            for filename, pdf_bytes, form_data, r_fmt in results:
+                n = seen_names.get(filename, 0)
+                final_name = filename if n == 0 else filename.replace(".pdf", f"_{n}.pdf")
+                seen_names[filename] = n + 1
+                zf.writestr(final_name, pdf_bytes)
+                all_results.append((final_name, pdf_bytes, form_data, r_fmt))
 
     buf.seek(0)
-    return buf.getvalue(), count, errors
+    return buf.getvalue(), all_results, all_errors
 
 
 def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
-    """Streamlit UI: call this inside a tab in app.py's main()."""
+    """Streamlit UI: call this inside a tab in app.py's main().
+
+    Every populated sheet in the uploaded workbook is processed
+    automatically. One click generates every report across every sheet
+    and produces a single ZIP for download.
+    """
     st.subheader("Batch Generate Reports")
     st.caption(
-        "Upload a spreadsheet matching your Backflow-template.xlsx layout. "
-        "One tab for Jacksonville-format devices, one for United-format devices. "
-        "Every row becomes one PDF."
+        "Upload your spreadsheet. Every populated sheet (Jacksonville, United, etc.) "
+        "is detected and processed automatically -- no need to pick a sheet or "
+        "confirm a template. Multiple devices at the same address are handled fine."
     )
 
     uploaded = st.file_uploader("Spreadsheet (.xlsx)", type=["xlsx"], key="batch_upload")
@@ -270,50 +306,46 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
         return
 
     sheets = pd.read_excel(uploaded, sheet_name=None, header=0)
-    sheet_name = st.selectbox("Sheet to process", list(sheets.keys()), key="batch_sheet_select")
-    df = sheets[sheet_name].dropna(how="all")
 
-    fmt = detect_format(sheet_name, list(df.columns))
-    fmt_override = st.radio(
-        "Template to use", ["Auto-detected: " + fmt.upper(), "Jacksonville", "United"],
-        index=0, key="batch_fmt_override",
-    )
-    if fmt_override == "Jacksonville":
-        fmt = "jax"
-    elif fmt_override == "United":
-        fmt = "united"
+    total_rows = 0
+    sheet_summaries = []
+    for sheet_name, raw_df in sheets.items():
+        df = raw_df.dropna(how="all")
+        if df.empty:
+            continue
+        fmt = detect_format(sheet_name, list(df.columns))
+        total_rows += len(df)
+        sheet_summaries.append((sheet_name, fmt, df))
 
-    st.write(f"Detected **{len(df)}** report rows. Using **{fmt.upper()}** template.")
-    st.dataframe(df.head(10).astype(str))
+    if total_rows == 0:
+        st.warning("No data rows found in any sheet of this file.")
+        return
 
-    save_to_jobs = False
-    if add_job_to_session:
-        save_to_jobs = st.checkbox("Also add each report to today's Jobs tab", value=True)
+    st.write(f"**{total_rows}** report row(s) detected across **{len(sheet_summaries)}** sheet(s).")
+    for sheet_name, fmt, df in sheet_summaries:
+        with st.expander(f"\U0001f4c4 {sheet_name} \u2014 {len(df)} rows \u2192 {fmt.upper()} template"):
+            st.dataframe(df.head(5).astype(str))
 
-    if st.button("Generate all reports as ZIP", type="primary"):
-        with st.spinner(f"Generating {len(df)} PDFs..."):
-            zip_bytes, count, errors = build_zip(df, fmt, generate_united_pdf, generate_jax_pdf, tester_profile)
+    if st.button(f"\u2705 Generate All {total_rows} Reports", type="primary", use_container_width=True):
+        with st.spinner(f"Generating {total_rows} PDFs..."):
+            zip_bytes, results, errors = build_zip_all(sheets, generate_united_pdf, generate_jax_pdf, tester_profile)
 
-            if save_to_jobs and add_job_to_session:
-                columns = list(df.columns)
-                for _, row in df.iterrows():
-                    fd = row_to_form_data(row, columns, fmt)
-                    if not fd:
-                        continue
-                    _apply_tester_profile(fd, fmt, tester_profile)
+            if add_job_to_session:
+                for _, pdf_bytes, form_data, fmt in results:
                     try:
-                        pdf_bytes = (generate_jax_pdf if fmt == "jax" else generate_united_pdf)(fd)
-                        add_job_to_session(fd, pdf_bytes, fmt)
+                        add_job_to_session(form_data, pdf_bytes, fmt)
                     except Exception:
                         pass
 
-        st.success(f"Generated {count} of {len(df)} reports.")
+        st.success(f"Generated {len(results)} of {total_rows} reports.")
         if errors:
             st.warning("Some rows failed:\n" + "\n".join(errors))
 
         st.download_button(
-            "Download ZIP of all reports",
+            f"\u2b07\ufe0f Download ZIP ({len(results)} PDFs)",
             data=zip_bytes,
-            file_name=f"backflow_batch_{fmt}_{datetime.now():%Y%m%d_%H%M}.zip",
+            file_name=f"backflow_batch_{datetime.now():%Y%m%d_%H%M}.zip",
             mime="application/zip",
+            type="primary",
+            use_container_width=True,
         )
