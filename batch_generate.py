@@ -3,14 +3,15 @@ batch_generate.py
 ------------------
 Drop this file next to app.py in the backflow_app repo.
 
-Adds a "Batch Generate" mode: the inspector fills one spreadsheet
-(matching your Backflow-template.xlsx headers, one tab per template)
-and the app produces ALL the PDFs at once, zipped for download.
+Two ways to bulk-generate reports:
 
-Every populated sheet in the uploaded workbook is processed automatically
-in a single pass -- no sheet picker, no manual template confirmation.
-Multiple devices at the same address are handled per-row, so a single
-upload can mix device types/serials under one customer without issue.
+1. "Build In-App" (no spreadsheet) -- set shared defaults once (address,
+   size, device type, branch, etc.), specify how many rows you need, then
+   edit only the fields that differ per building/device directly in an
+   in-app table. This is the primary/default mode.
+
+2. "Upload Spreadsheet" -- the original spreadsheet-import flow, kept for
+   compatibility with existing Backflow-template.xlsx files.
 
 Field keys below were pulled directly from app.py's UNITED_TEXT_FIELDS,
 JAX_TEXT_FIELDS, UNITED_CHECKBOXES and JAX_CHECKBOXES dicts, and from
@@ -38,8 +39,7 @@ import pandas as pd
 import streamlit as st
 
 # ---------------------------------------------------------------------------
-# JACKSONVILLE (JAX) column -> internal key map
-# Matches JAX_TEXT_FIELDS / JAX_CHECKBOXES in app.py exactly.
+# JACKSONVILLE (JAX) column -> internal key map (spreadsheet-upload mode)
 # ---------------------------------------------------------------------------
 JAX_COLUMN_MAP = {
     "premise name": "premises_name",
@@ -68,20 +68,13 @@ JAX_COLUMN_MAP = {
     "signature date": "signature_date",
 }
 
-# Ordered pair for the duplicated "Test purpose / Service type / Reclaim /
-# Fire service bypass" column blocks -- first occurrence = Commercial,
-# second occurrence = Residential.
 JAX_DUPLICATE_BLOCKS = [
     ("test purpose", ["comm_test_purpose", "res_test_purpose"]),
     ("service type", ["comm_service_type", "res_service_type"]),
     ("reclaim", ["comm_reclaim", "res_reclaim"]),
-    ("fire service bypass", ["comm_fire_bypass", None]),  # no res equivalent field
+    ("fire service bypass", ["comm_fire_bypass", None]),
 ]
 
-# ---------------------------------------------------------------------------
-# UNITED (backflow_template.pdf) column -> internal key map
-# Matches UNITED_TEXT_FIELDS / UNITED_CHECKBOXES in app.py exactly.
-# ---------------------------------------------------------------------------
 UNITED_COLUMN_MAP = {
     "customer name": "customer_name",
     "street address": "street_address",
@@ -125,6 +118,71 @@ RESULT_NORMALIZE = {
     "held": "Held",
 }
 
+# ---------------------------------------------------------------------------
+# Field definitions for "Build In-App" mode: (internal_key, label, kind, options)
+# kind is "text" or "select" (select is just a hint for the defaults form --
+# the in-app table itself uses plain editable text cells for simplicity).
+# ---------------------------------------------------------------------------
+UNITED_FIELD_DEFS = [
+    ("customer_name", "Customer Name", "text", None),
+    ("street_address", "Street Address", "text", None),
+    ("branch", "Branch", "text", None),
+    ("ahj", "AHJ", "text", None),
+    ("manufacturer", "Manufacturer", "text", None),
+    ("model", "Model", "text", None),
+    ("size", "Size", "text", None),
+    ("date", "Test Date", "text", None),
+    ("location", "Location/Building", "text", None),
+    ("assembly_type", "Assembly Type", "select", ["", "RP", "DC", "PVB", "SVB"]),
+    ("system_service", "System Service", "select", ["", "Fire", "Domestic", "Irrigation", "Attraction"]),
+    ("bypass", "Bypass", "select", ["", "Yes", "No"]),
+    ("serial_number", "Serial Number", "text", None),
+    ("cv1_result", "CV1 Result", "select", ["", "Closed Tight", "Leaked"]),
+    ("cv1_dp", "CV1 Differential Pressure", "text", None),
+    ("cv2_result", "CV2 Result", "select", ["", "Closed Tight", "Leaked"]),
+    ("cv2_dp", "CV2 Differential Pressure", "text", None),
+    ("rv_result", "RV Result", "select", ["", "Opened", "Did Not Open"]),
+    ("rv_psi", "RV Opened At PSI", "text", None),
+    ("rv_out_result", "RV Outlet", "select", ["", "Closed Tight", "Leaked"]),
+    ("rv_in_result", "RV Inlet", "select", ["", "Closed Tight", "Leaked"]),
+    ("pvb_ai_result", "Air Inlet Result", "select", ["", "Opened", "Did Not Open"]),
+    ("pvb_ai_psi", "Air Inlet PSI", "text", None),
+    ("pvb_cv_result", "CV Result (PVB)", "select", ["", "Held", "Leaked"]),
+    ("pvb_cv_psi", "CV PSI (PVB)", "text", None),
+    ("assembly_result", "Assembly Result", "select", ["", "PASSED", "FAILED"]),
+    ("repair_desc", "Repair Description", "text", None),
+]
+
+JAX_FIELD_DEFS = [
+    ("premises_name", "Premises Name", "text", None),
+    ("owner_name", "Owner Name", "text", None),
+    ("service_address", "Service Address", "text", None),
+    ("mailing_address", "Mailing Address", "text", None),
+    ("jea_account", "JEA Account #", "text", None),
+    ("contact_phone", "Contact Phone", "text", None),
+    ("meter_number", "Meter Number", "text", None),
+    ("comm_test_purpose", "Comm Test Purpose", "select", ["", "Annual", "Repair", "Replacement", "New Install"]),
+    ("comm_service_type", "Comm Service Type", "select", ["", "Fire", "Irrigation", "Process", "Potable"]),
+    ("comm_reclaim", "Comm Reclaim", "select", ["", "Yes", "No"]),
+    ("device_type", "Device Type", "select", ["", "RP", "DC", "PVB", "SVB"]),
+    ("manufacturer", "Manufacturer", "text", None),
+    ("model_number", "Model Number", "text", None),
+    ("size", "Size", "text", None),
+    ("install_date", "Install Date", "text", None),
+    ("physical_location", "Physical Location", "text", None),
+    ("serial_number", "Serial Number", "text", None),
+    ("init_cv1_result", "Init CV1", "select", ["", "Closed Tight", "Leaked"]),
+    ("init_cv1_psi", "Init CV1 PSI", "text", None),
+    ("init_cv2_result", "Init CV2", "select", ["", "Closed Tight", "Leaked"]),
+    ("init_cv2_psi", "Init CV2 PSI", "text", None),
+    ("init_rv_result", "Init RV", "select", ["", "Opened", "Did Not Open"]),
+    ("init_rv_psi", "Init RV PSI", "text", None),
+    ("init_pvb_result", "Init PVB", "select", ["", "Air Inlet Opened", "Air Inlet Did Not"]),
+    ("init_pvb_psi", "Init PVB PSI", "text", None),
+    ("assembly_result", "Assembly Result", "select", ["", "PASSED", "FAILED"]),
+    ("signature_date", "Signature Date", "text", None),
+]
+
 
 def _normalize_result(val) -> str:
     key = str(val).strip().lower()
@@ -136,9 +194,6 @@ def _normalize(col: str) -> str:
 
 
 def _resolve_duplicate_columns(columns: list) -> dict:
-    """Handle the JAX sheet's repeated headers (Test purpose, Service type,
-    Reclaim, Fire service bypass appear twice: commercial then residential).
-    Returns {column_position_index: internal_key}."""
     seen = {}
     resolved = {}
     for idx, col in enumerate(columns):
@@ -219,13 +274,13 @@ def _apply_tester_profile(form_data: dict, fmt: str, tester_profile: dict):
     form_data.setdefault("signature_b64", tester_profile.get("signature_b64", ""))
 
 
+# ---------------------------------------------------------------------------
+# Spreadsheet-upload mode (original flow, kept for compatibility)
+# ---------------------------------------------------------------------------
+
 def _process_sheet(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profile=None):
-    """Turn every row of one sheet into a generated PDF. Returns
-    (results, errors) where results is a list of
-    (filename, pdf_bytes, form_data, fmt) tuples."""
     generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
     columns = list(df.columns)
-
     name_col = "premise name" if fmt == "jax" else "customer name"
     serial_col = "serial number"
 
@@ -236,7 +291,6 @@ def _process_sheet(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_p
         if not form_data:
             continue
         _apply_tester_profile(form_data, fmt, tester_profile)
-
         try:
             pdf_bytes = generator(form_data)
         except Exception as e:
@@ -261,8 +315,6 @@ def _process_sheet(df, fmt: str, generate_united_pdf, generate_jax_pdf, tester_p
 
 
 def build_zip_all(sheets: dict, generate_united_pdf, generate_jax_pdf, tester_profile=None):
-    """Process every non-empty sheet in the uploaded workbook and bundle
-    every generated PDF into a single ZIP. Returns (zip_bytes, results, errors)."""
     buf = io.BytesIO()
     all_results = []
     all_errors = []
@@ -287,18 +339,11 @@ def build_zip_all(sheets: dict, generate_united_pdf, generate_jax_pdf, tester_pr
     return buf.getvalue(), all_results, all_errors
 
 
-def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
-    """Streamlit UI: call this inside a tab in app.py's main().
-
-    Every populated sheet in the uploaded workbook is processed
-    automatically. One click generates every report across every sheet
-    and produces a single ZIP for download.
-    """
-    st.subheader("Batch Generate Reports")
+def _render_spreadsheet_upload(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
     st.caption(
         "Upload your spreadsheet. Every populated sheet (Jacksonville, United, etc.) "
         "is detected and processed automatically -- no need to pick a sheet or "
-        "confirm a template. Multiple devices at the same address are handled fine."
+        "confirm a template."
     )
 
     uploaded = st.file_uploader("Spreadsheet (.xlsx)", type=["xlsx"], key="batch_upload")
@@ -326,10 +371,9 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
         with st.expander(f"\U0001f4c4 {sheet_name} \u2014 {len(df)} rows \u2192 {fmt.upper()} template"):
             st.dataframe(df.head(5).astype(str))
 
-    if st.button(f"\u2705 Generate All {total_rows} Reports", type="primary", use_container_width=True):
+    if st.button(f"\u2705 Generate All {total_rows} Reports", type="primary", use_container_width=True, key="ss_generate"):
         with st.spinner(f"Generating {total_rows} PDFs..."):
             zip_bytes, results, errors = build_zip_all(sheets, generate_united_pdf, generate_jax_pdf, tester_profile)
-
             if add_job_to_session:
                 for _, pdf_bytes, form_data, fmt in results:
                     try:
@@ -348,4 +392,176 @@ def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=N
             mime="application/zip",
             type="primary",
             use_container_width=True,
+            key="ss_download",
         )
+
+
+# ---------------------------------------------------------------------------
+# Build In-App mode (no spreadsheet)
+# ---------------------------------------------------------------------------
+
+def _row_dict_to_form_data(row: dict, key_by_label: dict, fmt: str) -> dict:
+    form_data = {}
+    for label, val in row.items():
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            continue
+        val = str(val).strip()
+        if not val:
+            continue
+        key = key_by_label.get(label)
+        if not key:
+            continue
+        if key.endswith("_result") or key.endswith("_reclaim"):
+            val = _normalize_result(val)
+        form_data[key] = val
+
+    if fmt == "jax" and "signature_date" in form_data:
+        form_data.setdefault("init_test_date", form_data["signature_date"])
+        form_data.setdefault("final_test_date", form_data["signature_date"])
+    if fmt == "united" and "date" in form_data:
+        form_data.setdefault("test_date", form_data["date"])
+
+    return form_data
+
+
+def _build_zip_from_table(df, key_by_label: dict, fmt: str, generate_united_pdf, generate_jax_pdf, tester_profile=None):
+    generator = generate_jax_pdf if fmt == "jax" else generate_united_pdf
+    name_label = "Premises Name" if fmt == "jax" else "Customer Name"
+    serial_label = "Serial Number"
+
+    buf = io.BytesIO()
+    results = []
+    errors = []
+    seen_names = {}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, row in enumerate(df.to_dict(orient="records"), start=1):
+            form_data = _row_dict_to_form_data(row, key_by_label, fmt)
+            if not form_data:
+                continue
+            _apply_tester_profile(form_data, fmt, tester_profile)
+            try:
+                pdf_bytes = generator(form_data)
+            except Exception as e:
+                errors.append(f"Row {i}: {e}")
+                continue
+
+            label_val = str(row.get(name_label) or "").strip().replace("/", "-")[:60] or "unknown"
+            serial_val = str(row.get(serial_label) or "").strip() or "NA"
+            filename = f"{fmt}_{label_val}_{serial_val}.pdf".replace(" ", "_")
+            n = seen_names.get(filename, 0)
+            final_name = filename if n == 0 else filename.replace(".pdf", f"_{n}.pdf")
+            seen_names[filename] = n + 1
+            zf.writestr(final_name, pdf_bytes)
+            results.append((final_name, pdf_bytes, form_data, fmt))
+
+    buf.seek(0)
+    return buf.getvalue(), results, errors
+
+
+def _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
+    st.caption(
+        "Set the shared defaults once below, then add rows for each building/device. "
+        "Every new row starts pre-filled with your defaults -- just edit the cells "
+        "that are different (address, serial number, PSI, etc.) directly in the table."
+    )
+
+    fmt_choice = st.radio("Template", ["United", "Jacksonville"], horizontal=True, key="grp_fmt_choice")
+    fmt_key = "united" if fmt_choice == "United" else "jax"
+    field_defs = UNITED_FIELD_DEFS if fmt_key == "united" else JAX_FIELD_DEFS
+    key_by_label = {label: key for key, label, _, _ in field_defs}
+
+    defaults_key = f"grp_defaults_{fmt_key}"
+    if defaults_key not in st.session_state:
+        st.session_state[defaults_key] = {key: "" for key, _, _, _ in field_defs}
+    defaults = st.session_state[defaults_key]
+
+    with st.expander("\u2699\ufe0f Shared Defaults \u2014 set once, applies to every new row", expanded=True):
+        cols = st.columns(3)
+        for i, (key, label, kind, opts) in enumerate(field_defs):
+            with cols[i % 3]:
+                widget_key = f"{defaults_key}_{key}"
+                if kind == "select":
+                    current = defaults.get(key, "")
+                    idx = opts.index(current) if current in opts else 0
+                    val = st.selectbox(label, opts, index=idx, key=widget_key)
+                else:
+                    val = st.text_input(label, value=defaults.get(key, ""), key=widget_key)
+                defaults[key] = val
+
+    table_key = f"grp_table_{fmt_key}"
+    if table_key not in st.session_state:
+        st.session_state[table_key] = pd.DataFrame(
+            [{label: defaults.get(key, "") for key, label, _, _ in field_defs}]
+        )
+
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        n_new = st.number_input(
+            "Add how many rows using current defaults?", min_value=1, max_value=200, value=1,
+            key=f"{table_key}_n",
+        )
+    with c2:
+        st.write("")
+        if st.button("\u2795 Add Rows", key=f"{table_key}_add", use_container_width=True):
+            new_rows = pd.DataFrame(
+                [{label: defaults.get(key, "") for key, label, _, _ in field_defs} for _ in range(int(n_new))]
+            )
+            st.session_state[table_key] = pd.concat([st.session_state[table_key], new_rows], ignore_index=True)
+            st.rerun()
+
+    edited_df = st.data_editor(
+        st.session_state[table_key],
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"{table_key}_editor",
+    )
+    st.session_state[table_key] = edited_df
+
+    if st.button(
+        f"\u2705 Generate All {len(edited_df)} Reports", type="primary",
+        use_container_width=True, key=f"{table_key}_gen",
+    ):
+        with st.spinner(f"Generating {len(edited_df)} PDFs..."):
+            zip_bytes, results, errors = _build_zip_from_table(
+                edited_df, key_by_label, fmt_key, generate_united_pdf, generate_jax_pdf, tester_profile
+            )
+            if add_job_to_session:
+                for _, pdf_bytes, form_data, r_fmt in results:
+                    try:
+                        add_job_to_session(form_data, pdf_bytes, r_fmt)
+                    except Exception:
+                        pass
+
+        st.success(f"Generated {len(results)} of {len(edited_df)} reports.")
+        if errors:
+            st.warning("Some rows failed:\n" + "\n".join(errors))
+
+        st.download_button(
+            f"\u2b07\ufe0f Download ZIP ({len(results)} PDFs)",
+            data=zip_bytes,
+            file_name=f"backflow_group_{fmt_key}_{datetime.now():%Y%m%d_%H%M}.zip",
+            mime="application/zip",
+            type="primary",
+            use_container_width=True,
+            key=f"{table_key}_download",
+        )
+
+
+def render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
+    """Streamlit UI: call this inside a tab in app.py's main().
+
+    Two modes: build the batch directly in the app (default, no spreadsheet
+    needed), or upload a spreadsheet (kept for backward compatibility).
+    """
+    st.subheader("Batch Generate Reports")
+    mode = st.radio(
+        "How do you want to provide the data?",
+        ["\U0001f3e2 Build In-App (no spreadsheet)", "\U0001f4c4 Upload Spreadsheet"],
+        horizontal=True,
+        key="batch_mode",
+    )
+
+    if mode.startswith("\U0001f3e2"):
+        _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_session, tester_profile)
+    else:
+        _render_spreadsheet_upload(generate_united_pdf, generate_jax_pdf, add_job_to_session, tester_profile)
