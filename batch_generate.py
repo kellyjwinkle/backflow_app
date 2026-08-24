@@ -120,8 +120,6 @@ RESULT_NORMALIZE = {
 
 # ---------------------------------------------------------------------------
 # Field definitions for "Build In-App" mode: (internal_key, label, kind, options)
-# kind is "text" or "select" (select is just a hint for the defaults form --
-# the in-app table itself uses plain editable text cells for simplicity).
 # ---------------------------------------------------------------------------
 UNITED_FIELD_DEFS = [
     ("customer_name", "Customer Name", "text", None),
@@ -459,12 +457,6 @@ def _build_zip_from_table(df, key_by_label: dict, fmt: str, generate_united_pdf,
 
 
 def _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
-    st.caption(
-        "Set the shared defaults once below, then add rows for each building/device. "
-        "Every new row starts pre-filled with your defaults -- just edit the cells "
-        "that are different (address, serial number, PSI, etc.) directly in the table."
-    )
-
     fmt_choice = st.radio("Template", ["United", "Jacksonville"], horizontal=True, key="grp_fmt_choice")
     fmt_key = "united" if fmt_choice == "United" else "jax"
     field_defs = UNITED_FIELD_DEFS if fmt_key == "united" else JAX_FIELD_DEFS
@@ -475,7 +467,9 @@ def _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_sess
         st.session_state[defaults_key] = {key: "" for key, _, _, _ in field_defs}
     defaults = st.session_state[defaults_key]
 
-    with st.expander("\u2699\ufe0f Shared Defaults \u2014 set once, applies to every new row", expanded=True):
+    st.markdown("#### \u0031\ufe0f\u20e3 Set Shared Defaults")
+    st.caption("These values apply to every new row you add below. Set them once per batch.")
+    with st.expander("\u2699\ufe0f Shared Defaults", expanded=True):
         cols = st.columns(3)
         for i, (key, label, kind, opts) in enumerate(field_defs):
             with cols[i % 3]:
@@ -488,6 +482,9 @@ def _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_sess
                     val = st.text_input(label, value=defaults.get(key, ""), key=widget_key)
                 defaults[key] = val
 
+    st.divider()
+    st.markdown("#### \u0032\ufe0f\u20e3 Add Rows, Then Edit the Table Below")
+
     table_key = f"grp_table_{fmt_key}"
     if table_key not in st.session_state:
         st.session_state[table_key] = pd.DataFrame(
@@ -497,8 +494,8 @@ def _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_sess
     c1, c2 = st.columns([3, 1])
     with c1:
         n_new = st.number_input(
-            "Add how many rows using current defaults?", min_value=1, max_value=200, value=1,
-            key=f"{table_key}_n",
+            "How many rows (buildings/devices) do you want to add using the defaults above?",
+            min_value=1, max_value=200, value=1, key=f"{table_key}_n",
         )
     with c2:
         st.write("")
@@ -509,13 +506,24 @@ def _render_group_builder(generate_united_pdf, generate_jax_pdf, add_job_to_sess
             st.session_state[table_key] = pd.concat([st.session_state[table_key], new_rows], ignore_index=True)
             st.rerun()
 
-    edited_df = st.data_editor(
-        st.session_state[table_key],
-        num_rows="dynamic",
-        use_container_width=True,
-        key=f"{table_key}_editor",
+    st.info(
+        "\U0001f447 **Edit the table below.** Double-click (or tap) any cell to change it. "
+        "Only touch what's different for that row -- address, serial number, PSI, bypass, pass/fail, etc. "
+        "Use the \u2795 row at the bottom of the table, or the trash icon on a row, to add/remove rows directly."
     )
+
+    with st.container(border=True):
+        edited_df = st.data_editor(
+            st.session_state[table_key],
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"{table_key}_editor",
+        )
     st.session_state[table_key] = edited_df
+    st.caption(f"\U0001f4ca {len(edited_df)} row(s) currently in the table.")
+
+    st.divider()
+    st.markdown("#### \u0033\ufe0f\u20e3 Generate")
 
     if st.button(
         f"\u2705 Generate All {len(edited_df)} Reports", type="primary",
