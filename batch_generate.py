@@ -116,6 +116,8 @@ RESULT_NORMALIZE = {
     "air inlet did not": "Air Inlet Did Not",
     "satisfactory": "Satisfactory",
     "held": "Held",
+    "passed": "PASSED",
+    "failed": "FAILED",
 }
 
 # ---------------------------------------------------------------------------
