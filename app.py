@@ -669,6 +669,7 @@ def render_technician_sidebar():
                 fill_color="rgba(255,255,255,0)", stroke_width=2, stroke_color="#000000",
                 background_color="#FFFFFF", height=80, width=220,
                 drawing_mode="freedraw", key="sb_sig_canvas",
+                return_image_data=True,
             )
             if canvas_result.image_data is not None:
                 arr = canvas_result.image_data
