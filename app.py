@@ -1343,7 +1343,9 @@ def main():
     with tab_jobs:
         render_jobs_tab()
     with tab_batch:
-        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session)
+        _active_tech = st.session_state.get("_sidebar_tech_sel", "")
+        _tech_profile = get_technician_profile(_active_tech) if _active_tech else {}
+        render_batch_tab(generate_united_pdf, generate_jax_pdf, add_job_to_session, _tech_profile)
 
 if __name__ == "__main__":
     main()
