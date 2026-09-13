@@ -339,6 +339,30 @@ def build_zip_all(sheets: dict, generate_united_pdf, generate_jax_pdf, tester_pr
     return buf.getvalue(), all_results, all_errors
 
 
+def _safe_read_excel(uploaded):
+    """Read an uploaded .xlsx file, guarding against corrupted/invalid
+    OOXML (e.g. malformed styles.xml from non-Excel exporters). Returns
+    (sheets_dict_or_None, error_message_or_None).
+    """
+    try:
+        return pd.read_excel(uploaded, sheet_name=None, header=0), None
+    except Exception as e:
+        try:
+            uploaded.seek(0)
+            return pd.read_excel(uploaded, sheet_name=None, header=0, engine="openpyxl"), None
+        except Exception:
+            pass
+        msg = (
+            "This spreadsheet couldn't be read -- its internal formatting (styles.xml) "
+            "appears corrupted or invalid. This usually happens when a file was created "
+            "or re-saved by a non-Excel tool. "
+            f"Original error: {e}\n\n"
+            "Fix: open the file in Excel, Google Sheets, or LibreOffice Calc and use "
+            "'Save As' / 'Download as .xlsx' to rebuild it, then re-upload."
+        )
+        return None, msg
+
+
 def _render_spreadsheet_upload(generate_united_pdf, generate_jax_pdf, add_job_to_session=None, tester_profile=None):
     st.caption(
         "Upload your spreadsheet. Every populated sheet (Jacksonville, United, etc.) "
@@ -350,7 +374,10 @@ def _render_spreadsheet_upload(generate_united_pdf, generate_jax_pdf, add_job_to
     if not uploaded:
         return
 
-    sheets = pd.read_excel(uploaded, sheet_name=None, header=0)
+    sheets, read_error = _safe_read_excel(uploaded)
+    if read_error:
+        st.error(f"\u26a0\ufe0f {read_error}")
+        return
 
     total_rows = 0
     sheet_summaries = []
